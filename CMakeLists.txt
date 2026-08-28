@@ -17,6 +17,7 @@ add_subdirectory(3rdparty/wxWidgets)
 
 add_executable(WxClash WIN32
     src/main.cpp
+    src/api/mihomo_api_client.cpp
     src/ui/main_frame.cpp
 )
 
@@ -35,4 +36,5 @@ target_compile_definitions(WxClash PRIVATE
 target_link_libraries(WxClash PRIVATE
     wx::core
     wx::base
+    wx::net
 )

@@ -55,6 +55,7 @@ namespace
 }
 
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
+    EVT_BUTTON(wxID_HIGHEST + 4, MainFrame::OnConnectApi)
     EVT_BUTTON(wxID_ANY, MainFrame::OnNavigation)
         EVT_CHOICE(wxID_ANY, MainFrame::OnModeChanged)
             wxEND_EVENT_TABLE()
@@ -63,6 +64,11 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     : wxFrame(nullptr, wxID_ANY, "WxClash", wxDefaultPosition, wxSize(1100, 700),
               wxDEFAULT_FRAME_STYLE)
 {
+    apiClient_.SetDebugCallback([this](const std::string& message) {
+        if (logText_)
+            logText_->AppendText(wxString::FromUTF8(message) + "\n\n");
+    });
+
     auto *rootSizer = new wxBoxSizer(wxVERTICAL);
     auto *contentSizer = new wxBoxSizer(wxHORIZONTAL);
     BuildNavigation(contentSizer);
@@ -136,6 +142,8 @@ void MainFrame::BuildPages()
     overviewSizer->Add(chartBox, 1, wxEXPAND | wxBOTTOM, kSpacing * 2);
 
     auto *shortcuts = new wxBoxSizer(wxHORIZONTAL);
+    shortcuts->Add(new wxButton(overview, wxID_HIGHEST + 4, "Connect API"), 0,
+                   wxRIGHT, kSpacing);
     shortcuts->Add(new wxButton(overview, wxID_ANY, "DNS Query"), 0,
                    wxRIGHT, kSpacing);
     shortcuts->Add(new wxButton(overview, wxID_ANY, "Flush DNS Cache"), 0,
@@ -203,7 +211,8 @@ void MainFrame::BuildPages()
                                    "[info] Log view is ready; waiting for Mihomo.\n",
                                    wxDefaultPosition, wxDefaultSize,
                                    wxTE_MULTILINE | wxTE_READONLY | wxTE_RICH2);
-    logSizer->Add(logText, 1, wxEXPAND);
+    logText_ = logText;
+    logSizer->Add(logText_, 1, wxEXPAND);
 
     auto *settings = AddPage(book_, "Settings");
     auto *settingsSizer = settings->GetSizer();
@@ -250,4 +259,15 @@ void MainFrame::OnModeChanged(wxCommandEvent &event)
         return;
 
     SetStatusText("Mode: " + modeChoice_->GetStringSelection(), 2);
+}
+
+void MainFrame::OnConnectApi(wxCommandEvent&)
+{
+    const auto response = apiClient_.GetVersion();
+    if (!response.ok)
+    {
+        SetStatusText("API error: " + wxString::FromUTF8(response.error), 2);
+        return;
+    }
+    SetStatusText("API connected", 2);
 }

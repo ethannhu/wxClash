@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-本方案将 [Mihomo Core 桌面控制器 UI 设计](mihomo-controller-ui-design.md) 落地为一个可编译的 wxWidgets UI 壳层。第一版只解决窗口结构、页面导航、主要控件选型和后续数据接入边界，不实现 API 客户端、WebSocket、进程管理或托盘功能。
+本方案将 [Mihomo Core 桌面控制器 UI 设计](mihomo-controller-ui-design.md) 落地为一个可编译的 wxWidgets UI 壳层。第一版只解决窗口结构、页面导航、主要控件选型和后续数据接入边界，不实现 API 客户端、WebSocket 或托盘功能。
 
 设计依据：
 
@@ -28,7 +28,7 @@
 
 - HTTP/WebSocket API 客户端。
 - 后台线程和 `wxThreadEvent` 数据分发。
-- Mihomo 进程管理、Windows 系统代理和托盘。
+- Windows 系统代理和托盘。
 - 配置持久化和 Secret 安全存储。
 
 ## 3. 布局结构

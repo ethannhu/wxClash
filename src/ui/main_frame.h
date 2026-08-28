@@ -2,10 +2,13 @@
 
 #include <wx/frame.h>
 
+#include "../api/mihomo_api_client.h"
+
 class wxChoice;
 class wxSimplebook;
 class wxSizer;
 class wxStaticText;
+class wxTextCtrl;
 class wxWindow;
 
 class MainFrame final : public wxFrame
@@ -32,9 +35,12 @@ private:
 
     void OnNavigation(wxCommandEvent& event);
     void OnModeChanged(wxCommandEvent& event);
+    void OnConnectApi(wxCommandEvent& event);
 
     wxSimplebook* book_ = nullptr;
     wxChoice* modeChoice_ = nullptr;
+    wxTextCtrl* logText_ = nullptr;
+    MihomoApiClient apiClient_;
 
     wxDECLARE_EVENT_TABLE();
 };

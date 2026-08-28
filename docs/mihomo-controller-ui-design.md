@@ -393,7 +393,7 @@ DNS 查询适合作为概览页快捷工具或独立工具对话框。
 
 ## 8. 线程与数据更新模型
 
-wxWidgets 主线程只负责控件创建、事件处理和绘制。HTTP、WebSocket、进程监控和文件读取都应在后台执行。
+wxWidgets 主线程只负责控件创建、事件处理和绘制。HTTP、WebSocket 和文件读取都应在后台执行。
 
 ```text
 UI 主线程
@@ -426,7 +426,6 @@ MihomoStreamClient
 └── LogsStream
 
 ApplicationServices
-├── CoreProcessManager
 ├── SystemProxyManager
 ├── ConfigProfileManager
 └── CredentialStore
@@ -547,7 +546,6 @@ Windows 平台优先使用 Credential Manager 或 DPAPI 保存 Secret。
 - 规则搜索、命中统计和临时禁用。
 - DNS 查询工具和缓存管理。
 - 配置文件方案管理。
-- 内核进程管理。
 - Windows 系统代理和托盘控制。
 
 ### 第三阶段：高级能力

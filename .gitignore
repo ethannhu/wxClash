@@ -1,0 +1,4 @@
+3rdparty/wxWidgets/*
+build/*
+out/*
+.vs

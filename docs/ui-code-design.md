@@ -77,8 +77,9 @@ UI 页面只接收不可变数据快照。HTTP、WebSocket 和文件操作不得
 
 ## 6. 构建
 
-```powershell
-cmake --build out/build/x64-debug --config Debug
+```bash
+meson setup builddir --buildtype=debug
+meson compile -C builddir
 ```
 
-当前实现继续使用 wxWidgets `core` 和 `base` target，不启用 AUI、STC 或其他可选模块。
+当前实现通过 Meson 使用 wxWidgets `core`、`base` 和 `net` 组件，不启用 AUI、STC 或其他可选模块。

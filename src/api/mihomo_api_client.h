@@ -24,6 +24,8 @@ class MihomoApiClient final
 public:
     explicit MihomoApiClient(MihomoApiConfig config = {});
 
+    void SetTimeoutMs(int timeoutMs) { config_.timeoutMs = timeoutMs; }
+
     void SetDebugCallback(std::function<void(const std::string&)> callback)
     {
         debugCallback_ = std::move(callback);

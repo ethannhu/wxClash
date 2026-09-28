@@ -87,6 +87,11 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     Centre();
 }
 
+MainFrame::~MainFrame()
+{
+    mihomoSidecar_.Stop();
+}
+
 void MainFrame::BuildNavigation(wxSizer *parentSizer)
 {
     auto *panel = new wxPanel(this, wxID_ANY, wxDefaultPosition,
@@ -263,6 +268,13 @@ void MainFrame::OnModeChanged(wxCommandEvent &event)
 
 void MainFrame::OnConnectApi(wxCommandEvent&)
 {
+    std::string startError;
+    if (!mihomoSidecar_.Start(apiClient_, startError))
+    {
+        SetStatusText("Sidecar error: " + wxString::FromUTF8(startError), 2);
+        return;
+    }
+
     const auto response = apiClient_.GetVersion();
     if (!response.ok)
     {

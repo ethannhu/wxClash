@@ -3,6 +3,7 @@
 #include <wx/frame.h>
 
 #include "../api/mihomo_api_client.h"
+#include "../core/mihomo_sidecar.h"
 
 class wxChoice;
 class wxSimplebook;
@@ -15,6 +16,7 @@ class MainFrame final : public wxFrame
 {
 public:
     MainFrame();
+    ~MainFrame() override;
 
 private:
     enum PageId
@@ -41,6 +43,7 @@ private:
     wxChoice* modeChoice_ = nullptr;
     wxTextCtrl* logText_ = nullptr;
     MihomoApiClient apiClient_;
+    MihomoSidecar mihomoSidecar_;
 
     wxDECLARE_EVENT_TABLE();
 };

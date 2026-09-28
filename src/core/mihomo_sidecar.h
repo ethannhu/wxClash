@@ -1,8 +1,14 @@
 #pragma once
 
+#include <functional>
+#include <memory>
 #include <string>
+#include <utility>
+
+#include <wx/process.h>
 
 class MihomoApiClient;
+class wxInputStream;
 
 class MihomoSidecar final
 {
@@ -20,11 +26,23 @@ public:
                const MihomoApiClient& apiClient,
                std::string& error);
     void Stop();
+    void PollOutput();
+    void SetOutputCallback(std::function<void(const std::string&)> callback)
+    {
+        outputCallback_ = std::move(callback);
+    }
     bool IsRunning() const { return pid_ > 0; }
 
 private:
     std::string PrepareConfig(const std::string& dataPath,
                               std::string& error) const;
+    void DrainStream(wxInputStream* stream, std::string& pending,
+                     const char* label);
+    void FlushPendingOutput();
 
     long pid_ = -1;
+    std::unique_ptr<wxProcess> process_;
+    std::function<void(const std::string&)> outputCallback_;
+    std::string stdoutPending_;
+    std::string stderrPending_;
 };

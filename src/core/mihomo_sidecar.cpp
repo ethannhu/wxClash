@@ -6,7 +6,9 @@
 #include <wx/ffile.h>
 #include <wx/filefn.h>
 #include <wx/filename.h>
+#include <wx/process.h>
 #include <wx/stdpaths.h>
+#include <wx/stream.h>
 #include <wx/utils.h>
 
 #ifdef __unix__
@@ -117,9 +119,14 @@ bool MihomoSidecar::Start(const std::string& corePath,
                              Quote(ToWx(dataPath)) +
                              " -f " + Quote(ToWx(config));
 
-    pid_ = wxExecute(command, wxEXEC_ASYNC);
+    process_ = std::make_unique<wxProcess>(nullptr);
+    process_->Redirect();
+    pid_ = wxExecute(command, wxEXEC_ASYNC, process_.get());
     if (pid_ <= 0)
+    {
+        process_.reset();
         return Fail(error, "Unable to start mihomo sidecar");
+    }
 
     MihomoApiClient probe = apiClient;
     probe.SetTimeoutMs(300);
@@ -143,8 +150,64 @@ void MihomoSidecar::Stop()
     if (pid_ <= 0)
         return;
 
+    PollOutput();
     wxKill(pid_, wxSIGTERM);
     wxMilliSleep(100);
+    PollOutput();
     wxKill(pid_, wxSIGKILL);
+    PollOutput();
+    FlushPendingOutput();
+    process_.reset();
     pid_ = -1;
+}
+
+void MihomoSidecar::DrainStream(wxInputStream* stream, std::string& pending,
+                                const char* label)
+{
+    if (!stream)
+        return;
+
+    char buffer[4096];
+    while (stream->CanRead())
+    {
+        stream->Read(buffer, sizeof(buffer));
+        const auto count = stream->LastRead();
+        if (count == 0)
+            break;
+        pending.append(buffer, count);
+
+        std::size_t newline = 0;
+        while ((newline = pending.find('\n')) != std::string::npos)
+        {
+            std::string line = pending.substr(0, newline);
+            pending.erase(0, newline + 1);
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            if (outputCallback_)
+                outputCallback_(std::string(label) + " " + line);
+        }
+    }
+}
+
+void MihomoSidecar::FlushPendingOutput()
+{
+    if (outputCallback_ && !stdoutPending_.empty())
+    {
+        outputCallback_("[mihomo stdout] " + stdoutPending_);
+        stdoutPending_.clear();
+    }
+    if (outputCallback_ && !stderrPending_.empty())
+    {
+        outputCallback_("[mihomo stderr] " + stderrPending_);
+        stderrPending_.clear();
+    }
+}
+
+void MihomoSidecar::PollOutput()
+{
+    if (!process_)
+        return;
+
+    DrainStream(process_->GetInputStream(), stdoutPending_, "[mihomo stdout]");
+    DrainStream(process_->GetErrorStream(), stderrPending_, "[mihomo stderr]");
 }

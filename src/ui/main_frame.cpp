@@ -109,6 +109,7 @@ namespace
 
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_BUTTON(wxID_HIGHEST + 4, MainFrame::OnConnectApi)
+    EVT_TIMER(wxID_HIGHEST + 8, MainFrame::OnSidecarOutput)
     EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
     EVT_BUTTON(wxID_HIGHEST + 6, MainFrame::OnBrowseDataPath)
     EVT_BUTTON(wxID_HIGHEST + 7, MainFrame::OnImportConfig)
@@ -116,9 +117,10 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
         EVT_CHOICE(wxID_ANY, MainFrame::OnModeChanged)
             wxEND_EVENT_TABLE()
 
-                MainFrame::MainFrame()
+MainFrame::MainFrame()
     : wxFrame(nullptr, wxID_ANY, "WxClash", wxDefaultPosition, wxSize(1100, 700),
-              wxDEFAULT_FRAME_STYLE)
+              wxDEFAULT_FRAME_STYLE),
+      sidecarOutputTimer_(this, wxID_HIGHEST + 8)
 {
     LoadSettings(corePath_, dataPath_);
     if (dataPath_.empty())
@@ -128,6 +130,11 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
         if (logText_)
             logText_->AppendText(wxString::FromUTF8(message) + "\n\n");
     });
+    mihomoSidecar_.SetOutputCallback([this](const std::string& message) {
+        if (logText_)
+            logText_->AppendText(wxString::FromUTF8(message) + "\n");
+    });
+    sidecarOutputTimer_.Start(50);
 
     auto *rootSizer = new wxBoxSizer(wxVERTICAL);
     auto *contentSizer = new wxBoxSizer(wxHORIZONTAL);
@@ -149,6 +156,7 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
 
 MainFrame::~MainFrame()
 {
+    sidecarOutputTimer_.Stop();
     SaveSettings(corePath_, dataPath_);
     mihomoSidecar_.Stop();
 }
@@ -352,6 +360,11 @@ void MainFrame::OnModeChanged(wxCommandEvent &event)
         return;
 
     SetStatusText("Mode: " + modeChoice_->GetStringSelection(), 2);
+}
+
+void MainFrame::OnSidecarOutput(wxTimerEvent&)
+{
+    mihomoSidecar_.PollOutput();
 }
 
 void MainFrame::OnConnectApi(wxCommandEvent&)

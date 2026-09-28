@@ -1,6 +1,7 @@
 #pragma once
 
 #include <wx/frame.h>
+#include <wx/timer.h>
 
 #include "../api/mihomo_api_client.h"
 #include "../core/mihomo_sidecar.h"
@@ -38,6 +39,7 @@ private:
     void OnNavigation(wxCommandEvent& event);
     void OnModeChanged(wxCommandEvent& event);
     void OnConnectApi(wxCommandEvent& event);
+    void OnSidecarOutput(wxTimerEvent& event);
     void OnBrowseCore(wxCommandEvent& event);
     void OnBrowseDataPath(wxCommandEvent& event);
     void OnImportConfig(wxCommandEvent& event);
@@ -51,6 +53,7 @@ private:
     std::string dataPath_;
     MihomoApiClient apiClient_;
     MihomoSidecar mihomoSidecar_;
+    wxTimer sidecarOutputTimer_;
 
     wxDECLARE_EVENT_TABLE();
 };

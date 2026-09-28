@@ -16,6 +16,8 @@ wx_dep = dependency(
   required: true,
 )
 
+yaml_cpp_dep = dependency('yaml-cpp', required: true)
+
 cpp_args = []
 if host_machine.system() == 'windows'
   # Declare Windows 7 as the minimum target system.
@@ -35,7 +37,7 @@ executable(
     'src/core/mihomo_sidecar.cpp',
     'src/ui/main_frame.cpp',
   ],
-  dependencies: wx_dep,
+  dependencies: [wx_dep, yaml_cpp_dep],
   cpp_args: cpp_args,
   win_subsystem: 'windows',
   install: false,

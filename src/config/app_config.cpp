@@ -1,51 +1,21 @@
 #include "app_config.h"
 
 #include <wx/filename.h>
-#include <wx/textfile.h>
+
+#include <yaml-cpp/yaml.h>
 
 #include <fstream>
-#include <sstream>
+#include <stdexcept>
+#include <utility>
 
 namespace
 {
-    std::string Trim(std::string value)
+    template <typename T>
+    void ReadScalar(const YAML::Node& parent, const char* key, T& target)
     {
-        const auto first = value.find_first_not_of(" \t\r");
-        if (first == std::string::npos)
-            return {};
-        const auto last = value.find_last_not_of(" \t\r");
-        return value.substr(first, last - first + 1);
-    }
-
-    std::string Unquote(std::string value)
-    {
-        value = Trim(std::move(value));
-        if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
-            return value.substr(1, value.size() - 2);
-        return value;
-    }
-
-    bool ParseBool(const std::string& value, bool fallback)
-    {
-        const auto normalized = Trim(value);
-        if (normalized == "true")
-            return true;
-        if (normalized == "false")
-            return false;
-        return fallback;
-    }
-
-    int ParseInt(const std::string& value, int fallback)
-    {
-        try
-        {
-            const auto parsed = std::stoi(Trim(value));
-            return parsed >= 0 && parsed <= 65535 ? parsed : fallback;
-        }
-        catch (...)
-        {
-            return fallback;
-        }
+        const auto value = parent[key];
+        if (value)
+            target = value.as<T>();
     }
 
     std::string YamlString(const std::string& value)
@@ -65,85 +35,78 @@ namespace
 
 bool MihomoConfig::Load(const std::string& path, std::string& error)
 {
-    wxTextFile file(wxString::FromUTF8(path));
-    if (!file.Exists())
+    if (!wxFileName::FileExists(wxString::FromUTF8(path)))
         return true;
-    if (!file.Open())
+
+    try
     {
-        error = "Unable to read mihomo config file";
-        return false;
-    }
+        const auto root = YAML::LoadFile(path);
+        if (!root.IsMap())
+            throw std::runtime_error("top-level YAML value must be a map");
 
-    dnsNameservers.clear();
-    std::string section;
-    for (size_t index = 0; index < file.GetLineCount(); ++index)
+        // Parse into a copy so a malformed file cannot leave the live
+        // configuration partially updated.
+        MihomoConfig parsed = *this;
+        parsed.dnsNameservers.clear();
+
+        ReadScalar(root, "mode", parsed.mode);
+        ReadScalar(root, "mixed-port", parsed.mixedPort);
+        ReadScalar(root, "port", parsed.httpPort);
+        ReadScalar(root, "socks-port", parsed.socksPort);
+        ReadScalar(root, "allow-lan", parsed.allowLan);
+        ReadScalar(root, "ipv6", parsed.ipv6);
+        ReadScalar(root, "log-level", parsed.logLevel);
+        ReadScalar(root, "external-controller", parsed.externalController);
+        ReadScalar(root, "secret", parsed.secret);
+
+        const auto tun = root["tun"];
+        if (tun)
+        {
+            if (!tun.IsMap())
+                throw std::runtime_error("'tun' must be a map");
+            ReadScalar(tun, "enable", parsed.tunEnable);
+            ReadScalar(tun, "stack", parsed.tunStack);
+        }
+
+        const auto dns = root["dns"];
+        if (dns)
+        {
+            if (!dns.IsMap())
+                throw std::runtime_error("'dns' must be a map");
+            ReadScalar(dns, "enable", parsed.dnsEnable);
+            ReadScalar(dns, "enhanced-mode", parsed.dnsEnhancedMode);
+
+            const auto nameservers = dns["nameserver"];
+            if (nameservers)
+            {
+                if (!nameservers.IsSequence())
+                    throw std::runtime_error("'dns.nameserver' must be a sequence");
+                for (const auto& nameserver : nameservers)
+                    parsed.dnsNameservers.push_back(nameserver.as<std::string>());
+            }
+        }
+
+        if (parsed.mixedPort < 0 || parsed.mixedPort > 65535 ||
+            parsed.httpPort < 0 || parsed.httpPort > 65535 ||
+            parsed.socksPort < 0 || parsed.socksPort > 65535)
+        {
+            throw std::runtime_error("port values must be between 0 and 65535");
+        }
+        if (parsed.dnsNameservers.empty())
+            parsed.dnsNameservers = {"223.5.5.5", "8.8.8.8"};
+
+        *this = std::move(parsed);
+        return true;
+    }
+    catch (const YAML::Exception& exception)
     {
-        auto line = std::string(file.GetLine(index).utf8_str());
-        line = Trim(line);
-        if (line.empty() || line.front() == '#')
-            continue;
-
-        if (line == "tun:")
-        {
-            section = "tun";
-            continue;
-        }
-        if (line == "dns:")
-        {
-            section = "dns";
-            continue;
-        }
-        if (line.rfind("- ", 0) == 0 && section == "dns_nameservers")
-        {
-            dnsNameservers.push_back(Unquote(line.substr(2)));
-            continue;
-        }
-
-        const auto separator = line.find(':');
-        if (separator == std::string::npos)
-            continue;
-
-        const auto key = Trim(line.substr(0, separator));
-        const auto value = Unquote(line.substr(separator + 1));
-        if (section == "tun")
-        {
-            if (key == "enable")
-                tunEnable = ParseBool(value, tunEnable);
-            else if (key == "stack")
-                tunStack = value;
-        }
-        else if (section == "dns")
-        {
-            if (key == "enable")
-                dnsEnable = ParseBool(value, dnsEnable);
-            else if (key == "enhanced-mode")
-                dnsEnhancedMode = value;
-            else if (key == "nameserver")
-                section = "dns_nameservers";
-        }
-        else if (key == "mode")
-            mode = value;
-        else if (key == "mixed-port")
-            mixedPort = ParseInt(value, mixedPort);
-        else if (key == "port")
-            httpPort = ParseInt(value, httpPort);
-        else if (key == "socks-port")
-            socksPort = ParseInt(value, socksPort);
-        else if (key == "allow-lan")
-            allowLan = ParseBool(value, allowLan);
-        else if (key == "ipv6")
-            ipv6 = ParseBool(value, ipv6);
-        else if (key == "log-level")
-            logLevel = value;
-        else if (key == "external-controller")
-            externalController = value;
-        else if (key == "secret")
-            secret = value;
+        error = "Unable to parse mihomo config: " + std::string(exception.what());
     }
-
-    if (dnsNameservers.empty())
-        dnsNameservers = {"223.5.5.5", "8.8.8.8"};
-    return true;
+    catch (const std::exception& exception)
+    {
+        error = "Invalid mihomo config: " + std::string(exception.what());
+    }
+    return false;
 }
 
 bool MihomoConfig::Save(const std::string& path, std::string& error) const

@@ -5,7 +5,7 @@
 安装构建工具和 wxWidgets 开发包（Debian/Ubuntu）：
 
 ```bash
-sudo apt install build-essential meson ninja-build libwxgtk3.2-dev
+sudo apt install build-essential meson ninja-build libwxgtk3.2-dev libyaml-cpp-dev
 ```
 
 配置、编译并运行：
@@ -17,6 +17,7 @@ meson compile -C builddir
 ```
 
 Meson 通过 `wx-config` 查找 wxWidgets，并链接 `core`、`base` 和 `net` 组件。若系统安装的是其他 wxWidgets GTK 版本，只要该版本提供这些组件即可。
+Meson 同时通过 pkg-config 或 CMake 查找 `yaml-cpp`。
 
 重新配置已有构建目录：
 

@@ -20,13 +20,65 @@
 #include <wx/textctrl.h>
 #include <wx/tokenzr.h>
 
+#include <yaml-cpp/yaml.h>
+
+#include <algorithm>
+#include <cstdint>
 #include <iostream>
+#include <sstream>
 
 namespace
 {
     constexpr int kSpacing = 8;
     constexpr int kPadding = 12;
     constexpr int kNavigationWidth = 150;
+
+    std::string NodeString(const YAML::Node& node, const char* key,
+                           const std::string& fallback = {})
+    {
+        const auto value = node[key];
+        return value ? value.as<std::string>() : fallback;
+    }
+
+    std::uint64_t NodeUint64(const YAML::Node& node, const char* key)
+    {
+        const auto value = node[key];
+        if (!value)
+            return 0;
+        try
+        {
+            return value.as<std::uint64_t>();
+        }
+        catch (...)
+        {
+            return 0;
+        }
+    }
+
+    std::string FormatBytes(std::uint64_t bytes)
+    {
+        const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+        double value = static_cast<double>(bytes);
+        std::size_t unit = 0;
+        while (value >= 1024.0 && unit < 4)
+        {
+            value /= 1024.0;
+            ++unit;
+        }
+        std::ostringstream output;
+        if (unit == 0)
+            output << bytes;
+        else
+            output.setf(std::ios::fixed), output.precision(value < 10 ? 1 : 0),
+                output << value;
+        output << ' ' << units[unit];
+        return output.str();
+    }
+
+    std::string FormatRate(std::uint64_t bytesPerSecond)
+    {
+        return FormatBytes(bytesPerSecond) + "/s";
+    }
 
     wxString SettingsPath()
     {
@@ -115,6 +167,7 @@ namespace
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_BUTTON(wxID_HIGHEST + 4, MainFrame::OnConnectApi)
     EVT_TIMER(wxID_HIGHEST + 8, MainFrame::OnSidecarOutput)
+    EVT_TIMER(wxID_HIGHEST + 10, MainFrame::OnMonitorTimer)
     EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
     EVT_BUTTON(wxID_HIGHEST + 6, MainFrame::OnBrowseDataPath)
     EVT_BUTTON(wxID_HIGHEST + 7, MainFrame::OnBrowseConfig)
@@ -125,8 +178,9 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
 
 MainFrame::MainFrame()
     : wxFrame(nullptr, wxID_ANY, "WxClash", wxDefaultPosition, wxSize(1100, 700),
-              wxDEFAULT_FRAME_STYLE),
-      sidecarOutputTimer_(this, wxID_HIGHEST + 8)
+      wxDEFAULT_FRAME_STYLE),
+      sidecarOutputTimer_(this, wxID_HIGHEST + 8),
+      monitorTimer_(this, wxID_HIGHEST + 10)
 {
     LoadSettings(corePath_, dataPath_, configPath_);
     if (dataPath_.empty())
@@ -169,6 +223,7 @@ MainFrame::MainFrame()
 MainFrame::~MainFrame()
 {
     sidecarOutputTimer_.Stop();
+    monitorTimer_.Stop();
     if (configPathText_)
         configPath_ = configPathText_->GetValue().ToStdString();
     SaveSettings(corePath_, dataPath_, configPath_);
@@ -216,49 +271,35 @@ void MainFrame::BuildPages()
     overviewSizer->Add(modeSizer, 0, wxBOTTOM, kSpacing * 2);
 
     auto *metrics = new wxBoxSizer(wxHORIZONTAL);
-    AddMetric(overview, metrics, "Download", "0 B/s");
-    AddMetric(overview, metrics, "Upload", "0 B/s");
-    AddMetric(overview, metrics, "Active connections", "0");
-    AddMetric(overview, metrics, "Mihomo memory", "0 MB");
+    downloadMetric_ = AddMetric(overview, metrics, "Download", "0 B/s");
+    uploadMetric_ = AddMetric(overview, metrics, "Upload", "0 B/s");
+    activeConnectionsMetric_ = AddMetric(overview, metrics, "Active connections", "0");
+    memoryMetric_ = AddMetric(overview, metrics, "Mihomo memory", "0 MB");
     overviewSizer->Add(metrics, 0, wxEXPAND | wxBOTTOM, kSpacing * 2);
 
     auto *chartBox = new wxStaticBoxSizer(wxVERTICAL, overview,
                                           "Traffic (last 120 seconds)");
-    chartBox->Add(new wxStaticText(overview, wxID_ANY,
-                                   "The traffic chart will be enabled after /traffic is connected."),
-                  1, wxALIGN_CENTER | wxALL, kPadding);
+    trafficSummary_ = new wxStaticText(overview, wxID_ANY,
+                                       "Waiting for Mihomo traffic data...");
+    chartBox->Add(trafficSummary_, 1, wxALIGN_CENTER | wxALL, kPadding);
     overviewSizer->Add(chartBox, 1, wxEXPAND | wxBOTTOM, kSpacing * 2);
 
     auto *shortcuts = new wxBoxSizer(wxHORIZONTAL);
     shortcuts->Add(new wxButton(overview, wxID_HIGHEST + 4, "Connect API"), 0,
                    wxRIGHT, kSpacing);
-    shortcuts->Add(new wxButton(overview, wxID_ANY, "DNS Query"), 0,
-                   wxRIGHT, kSpacing);
-    shortcuts->Add(new wxButton(overview, wxID_ANY, "Flush DNS Cache"), 0,
-                   wxRIGHT, kSpacing);
-    shortcuts->Add(new wxButton(overview, wxID_ANY, "Flush FakeIP Cache"));
     overviewSizer->Add(shortcuts, 0);
 
     auto *proxies = AddPage(book_, "Proxies");
     auto *proxySizer = proxies->GetSizer();
     auto *proxySplit = new wxBoxSizer(wxHORIZONTAL);
-    auto *groups = new wxListBox(proxies, wxID_ANY);
-    groups->Append("Selector");
-    groups->Append("URL Test");
-    groups->Append("Fallback");
-    groups->Append("Streaming");
-    groups->SetSelection(0);
-    proxySplit->Add(groups, 0, wxEXPAND | wxRIGHT, kSpacing);
-    auto *proxyTable = new wxDataViewListCtrl(proxies, wxID_ANY);
-    AddTableColumn(proxyTable, "Name", 190);
-    AddTableColumn(proxyTable, "Type", 110);
-    AddTableColumn(proxyTable, "Delay", 90);
-    AddTableColumn(proxyTable, "Status", 90);
-    proxyTable->AppendItem({"Japan 01", "VMess", "86 ms", "Available"});
-    proxyTable->AppendItem({"Hong Kong 02", "Trojan", "112 ms", "Available"});
-    proxyTable->AppendItem({"Singapore 01", "Hysteria2", "168 ms", "Available"});
-    proxyTable->AppendItem({"United States 03", "VLESS", "Timeout", "Unavailable"});
-    proxySplit->Add(proxyTable, 1, wxEXPAND);
+    proxyGroups_ = new wxListBox(proxies, wxID_ANY);
+    proxySplit->Add(proxyGroups_, 0, wxEXPAND | wxRIGHT, kSpacing);
+    proxyTable_ = new wxDataViewListCtrl(proxies, wxID_ANY);
+    AddTableColumn(proxyTable_, "Name", 190);
+    AddTableColumn(proxyTable_, "Type", 110);
+    AddTableColumn(proxyTable_, "Delay", 90);
+    AddTableColumn(proxyTable_, "Status", 90);
+    proxySplit->Add(proxyTable_, 1, wxEXPAND);
     proxySizer->Add(new wxSearchCtrl(proxies, wxID_ANY), 0,
                     wxEXPAND | wxBOTTOM, kSpacing);
     proxySizer->Add(proxySplit, 1, wxEXPAND);
@@ -267,31 +308,25 @@ void MainFrame::BuildPages()
     auto *connectionSizer = connections->GetSizer();
     connectionSizer->Add(new wxSearchCtrl(connections, wxID_ANY), 0,
                          wxEXPAND | wxBOTTOM, kSpacing);
-    auto *connectionTable = new wxDataViewListCtrl(connections, wxID_ANY);
-    AddTableColumn(connectionTable, "Target", 220);
-    AddTableColumn(connectionTable, "Process", 160);
-    AddTableColumn(connectionTable, "Network", 80);
-    AddTableColumn(connectionTable, "Rule", 150);
-    AddTableColumn(connectionTable, "Proxy chain", 180);
-    connectionTable->AppendItem({"example.com:443", "browser.exe", "TCP",
-                                 "MATCH", "Selector / Japan 01"});
-    connectionTable->AppendItem({"dns.google:443", "app.exe", "TCP",
-                                 "GEOIP", "Direct"});
-    connectionSizer->Add(connectionTable, 1, wxEXPAND);
+    connectionTable_ = new wxDataViewListCtrl(connections, wxID_ANY);
+    AddTableColumn(connectionTable_, "Target", 220);
+    AddTableColumn(connectionTable_, "Process", 160);
+    AddTableColumn(connectionTable_, "Network", 80);
+    AddTableColumn(connectionTable_, "Rule", 150);
+    AddTableColumn(connectionTable_, "Proxy chain", 180);
+    connectionSizer->Add(connectionTable_, 1, wxEXPAND);
 
     auto *rules = AddPage(book_, "Rules");
     auto *ruleSizer = rules->GetSizer();
     ruleSizer->Add(new wxStaticText(rules, wxID_ANY,
                                     "Disabling a rule only affects the current runtime and is lost after restart."),
                    0, wxBOTTOM, kSpacing);
-    auto *ruleTable = new wxDataViewListCtrl(rules, wxID_ANY);
-    AddTableColumn(ruleTable, "Index", 70);
-    AddTableColumn(ruleTable, "Type", 120);
-    AddTableColumn(ruleTable, "Match", 300);
-    AddTableColumn(ruleTable, "Policy", 150);
-    ruleTable->AppendItem({"0", "DOMAIN-SUFFIX", "example.com", "Selector"});
-    ruleTable->AppendItem({"1", "GEOIP", "CN", "DIRECT"});
-    ruleSizer->Add(ruleTable, 1, wxEXPAND);
+    ruleTable_ = new wxDataViewListCtrl(rules, wxID_ANY);
+    AddTableColumn(ruleTable_, "Index", 70);
+    AddTableColumn(ruleTable_, "Type", 120);
+    AddTableColumn(ruleTable_, "Match", 300);
+    AddTableColumn(ruleTable_, "Policy", 150);
+    ruleSizer->Add(ruleTable_, 1, wxEXPAND);
 
     auto *logs = AddPage(book_, "Logs");
     auto *logSizer = logs->GetSizer();
@@ -307,14 +342,6 @@ void MainFrame::BuildPages()
     auto *notebook = new wxNotebook(settings, wxID_ANY);
     auto *connectionPage = new wxPanel(notebook);
     auto *connectionForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
-    connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "API address"));
-    connectionForm->Add(new wxTextCtrl(connectionPage, wxID_ANY, "127.0.0.1:9090"),
-                        1, wxEXPAND);
-    connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "API secret"));
-    connectionForm->Add(new wxTextCtrl(connectionPage, wxID_ANY, "",
-                                       wxDefaultPosition, wxDefaultSize,
-                                       wxTE_PASSWORD),
-                        1, wxEXPAND);
     connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "Mihomo core"));
     auto *corePathSizer = new wxBoxSizer(wxHORIZONTAL);
     corePathText_ = new wxTextCtrl(connectionPage, wxID_ANY,
@@ -349,18 +376,8 @@ void MainFrame::BuildPages()
     connectionPage->SetSizer(connectionForm);
     notebook->AddPage(connectionPage, "Connection");
 
-    auto *runtimePage = new wxPanel(notebook);
-    auto *runtimeSizer = new wxBoxSizer(wxVERTICAL);
-    runtimeSizer->Add(new wxCheckBox(runtimePage, wxID_ANY, "Allow LAN connections"),
-                      0, wxBOTTOM, kSpacing);
-    runtimeSizer->Add(new wxCheckBox(runtimePage, wxID_ANY, "Enable IPv6"), 0,
-                      wxBOTTOM, kSpacing);
-    runtimeSizer->Add(new wxStaticText(runtimePage, wxID_ANY,
-                                       "Runtime configuration will be editable after /configs is connected."));
-    runtimePage->SetSizer(runtimeSizer);
-    notebook->AddPage(runtimePage, "Runtime");
-
     auto *mihomoPage = new wxPanel(notebook);
+    auto *mihomoPageSizer = new wxBoxSizer(wxVERTICAL);
     auto *mihomoForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
     mihomoModeChoice_ = new wxChoice(mihomoPage, wxID_ANY);
     mihomoModeChoice_->Append("Rule");
@@ -426,35 +443,23 @@ void MainFrame::BuildPages()
                                      wxTE_MULTILINE);
     mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "DNS nameservers"));
     mihomoForm->Add(nameserverText_, 1, wxEXPAND);
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, wxEmptyString));
-    mihomoForm->Add(new wxButton(mihomoPage, wxID_HIGHEST + 9, "Save mihomo config"),
-                     0, wxALIGN_RIGHT);
     mihomoForm->AddGrowableCol(1, 1);
-    mihomoForm->AddGrowableRow(10, 1);
-    mihomoPage->SetSizer(mihomoForm);
+    mihomoPageSizer->Add(mihomoForm, 1, wxEXPAND);
+
+    auto *configActions = new wxBoxSizer(wxHORIZONTAL);
+    configActions->Add(new wxButton(mihomoPage, wxID_HIGHEST + 7, "Import"),
+                       0);
+    configActions->AddStretchSpacer(1);
+    configActions->Add(new wxButton(mihomoPage, wxID_HIGHEST + 9, "Save"),
+                       0);
+    mihomoPageSizer->Add(configActions, 0, wxEXPAND | wxTOP, kSpacing);
+    mihomoPage->SetSizer(mihomoPageSizer);
     notebook->AddPage(mihomoPage, "Mihomo");
 
-    const auto selectChoice = [](wxChoice* choice, const std::string& value) {
-        const int index = choice->FindString(wxString::FromUTF8(value));
-        choice->SetSelection(index == wxNOT_FOUND ? 0 : index);
-    };
-    selectChoice(mihomoModeChoice_, mihomoConfig_.mode);
-    selectChoice(mihomoLogLevelChoice_, mihomoConfig_.logLevel);
-    selectChoice(tunStackChoice_, mihomoConfig_.tunStack);
-    selectChoice(dnsModeChoice_, mihomoConfig_.dnsEnhancedMode);
-    mixedPortText_->SetValue(std::to_string(mihomoConfig_.mixedPort));
-    httpPortText_->SetValue(std::to_string(mihomoConfig_.httpPort));
-    socksPortText_->SetValue(std::to_string(mihomoConfig_.socksPort));
-    controllerText_->SetValue(wxString::FromUTF8(mihomoConfig_.externalController));
-    secretText_->SetValue(wxString::FromUTF8(mihomoConfig_.secret));
-    allowLanCheck_->SetValue(mihomoConfig_.allowLan);
-    ipv6Check_->SetValue(mihomoConfig_.ipv6);
-    tunEnableCheck_->SetValue(mihomoConfig_.tunEnable);
-    dnsEnableCheck_->SetValue(mihomoConfig_.dnsEnable);
-    wxString nameservers;
-    for (const auto& nameserver : mihomoConfig_.dnsNameservers)
-        nameservers += wxString::FromUTF8(nameserver) + "\n";
-    nameserverText_->SetValue(nameservers);
+    UpdateMihomoControls();
+    const auto mode = mihomoConfig_.mode == "global" ? "Global" :
+                      mihomoConfig_.mode == "direct" ? "Direct" : "Rule";
+    modeChoice_->SetStringSelection(mode);
     settingsSizer->Add(notebook, 1, wxEXPAND);
 
     if (!corePath_.empty())
@@ -485,16 +490,222 @@ void MainFrame::OnSidecarOutput(wxTimerEvent&)
     mihomoSidecar_.PollOutput();
 }
 
+void MainFrame::OnMonitorTimer(wxTimerEvent&)
+{
+    RefreshCoreData();
+}
+
+void MainFrame::RefreshCoreData()
+{
+    const auto connectionsResponse = apiClient_.GetConnections();
+    if (!connectionsResponse.ok)
+    {
+        SetStatusText("Monitor error: " +
+                          wxString::FromUTF8(connectionsResponse.error),
+                      2);
+        return;
+    }
+
+    try
+    {
+        const auto connectionsRoot = YAML::Load(connectionsResponse.body);
+        const auto connections = connectionsRoot["connections"];
+        const auto downloadTotal = NodeUint64(connectionsRoot, "downloadTotal");
+        const auto uploadTotal = NodeUint64(connectionsRoot, "uploadTotal");
+
+        if (activeConnectionsMetric_)
+            activeConnectionsMetric_->SetLabel(
+                std::to_string(connections && connections.IsSequence()
+                                   ? connections.size()
+                                   : 0));
+
+        if (hasTrafficSample_)
+        {
+            const auto downloadDelta = downloadTotal >= lastDownloadTotal_
+                                           ? downloadTotal - lastDownloadTotal_
+                                           : 0;
+            const auto uploadDelta = uploadTotal >= lastUploadTotal_
+                                         ? uploadTotal - lastUploadTotal_
+                                         : 0;
+            if (downloadMetric_)
+                downloadMetric_->SetLabel(FormatRate(downloadDelta));
+            if (uploadMetric_)
+                uploadMetric_->SetLabel(FormatRate(uploadDelta));
+            if (trafficSummary_)
+                trafficSummary_->SetLabel(
+                    "Download " + wxString::FromUTF8(FormatRate(downloadDelta)) +
+                    "    Upload " + wxString::FromUTF8(FormatRate(uploadDelta)));
+            SetStatusText("Down " + wxString::FromUTF8(FormatRate(downloadDelta)) +
+                              "    Up " + wxString::FromUTF8(FormatRate(uploadDelta)),
+                          1);
+        }
+        lastDownloadTotal_ = downloadTotal;
+        lastUploadTotal_ = uploadTotal;
+        hasTrafficSample_ = true;
+
+        if (connectionTable_)
+        {
+            connectionTable_->DeleteAllItems();
+            if (connections && connections.IsSequence())
+            {
+                for (const auto& connection : connections)
+                {
+                    const auto metadata = connection["metadata"];
+                    std::string target = NodeString(metadata, "host");
+                    if (target.empty())
+                        target = NodeString(metadata, "destinationIP");
+                    const auto port = NodeString(metadata, "destinationPort");
+                    if (!port.empty())
+                        target += ":" + port;
+
+                    std::string chains;
+                    const auto chain = connection["chains"];
+                    if (chain && chain.IsSequence())
+                    {
+                        for (std::size_t index = 0; index < chain.size(); ++index)
+                        {
+                            if (index != 0)
+                                chains += " / ";
+                            chains += chain[index].as<std::string>();
+                        }
+                    }
+                    connectionTable_->AppendItem(
+                        {target,
+                         NodeString(metadata, "process"),
+                         NodeString(metadata, "network"),
+                         NodeString(connection, "rule"),
+                         chains});
+                }
+            }
+        }
+    }
+    catch (const std::exception& exception)
+    {
+        SetStatusText("Invalid /connections response: " +
+                          wxString::FromUTF8(exception.what()),
+                      2);
+    }
+
+    const auto memoryResponse = apiClient_.GetMemory();
+    if (memoryResponse.ok)
+    {
+        try
+        {
+            const auto memory = YAML::Load(memoryResponse.body);
+            if (memoryMetric_)
+                memoryMetric_->SetLabel(FormatBytes(NodeUint64(memory, "inuse")));
+        }
+        catch (const std::exception& exception)
+        {
+            SetStatusText("Invalid /memory response: " +
+                              wxString::FromUTF8(exception.what()),
+                          2);
+        }
+    }
+
+    const auto proxiesResponse = apiClient_.GetProxies();
+    if (proxiesResponse.ok)
+    {
+        try
+        {
+            const auto root = YAML::Load(proxiesResponse.body);
+            const auto proxies = root["proxies"];
+            if (proxyGroups_)
+                proxyGroups_->Clear();
+            if (proxyTable_)
+                proxyTable_->DeleteAllItems();
+
+            if (proxies && proxies.IsMap())
+            {
+                for (const auto& entry : proxies)
+                {
+                    const auto name = entry.first.as<std::string>();
+                    const auto proxy = entry.second;
+                    const auto type = NodeString(proxy, "type");
+                    const auto isGroup = type == "Selector" || type == "URLTest" ||
+                                         type == "Fallback" || type == "LoadBalance" ||
+                                         type == "Relay";
+                    if (isGroup && proxyGroups_)
+                        proxyGroups_->Append(name);
+
+                    std::string delay = NodeString(proxy, "now");
+                    if (delay.empty())
+                    {
+                        const auto history = proxy["history"];
+                        if (history && history.IsSequence() && history.size() > 0)
+                            delay = NodeString(history[history.size() - 1], "delay");
+                    }
+                    if (delay.empty())
+                        delay = "-";
+                    const auto alive = proxy["alive"] ? proxy["alive"].as<bool>() : true;
+                    if (proxyTable_)
+                    {
+                        wxVector<wxVariant> values;
+                        values.push_back(wxString::FromUTF8(name));
+                        values.push_back(wxString::FromUTF8(type));
+                        values.push_back(wxString::FromUTF8(delay));
+                        values.push_back(alive ? "Available" : "Unavailable");
+                        proxyTable_->AppendItem(values);
+                    }
+                }
+            }
+            if (proxyGroups_ && proxyGroups_->GetCount() > 0)
+                proxyGroups_->SetSelection(0);
+        }
+        catch (const std::exception& exception)
+        {
+            SetStatusText("Invalid /proxies response: " +
+                              wxString::FromUTF8(exception.what()),
+                          2);
+        }
+    }
+
+    const auto rulesResponse = apiClient_.GetRules();
+    if (rulesResponse.ok)
+    {
+        try
+        {
+            const auto root = YAML::Load(rulesResponse.body);
+            const auto rules = root["rules"];
+            if (ruleTable_)
+            {
+                ruleTable_->DeleteAllItems();
+                if (rules && rules.IsSequence())
+                {
+                    std::size_t index = 0;
+                    for (const auto& rule : rules)
+                    {
+                        ruleTable_->AppendItem({
+                            std::to_string(index++), NodeString(rule, "type"),
+                            NodeString(rule, "payload"), NodeString(rule, "proxy")});
+                    }
+                }
+            }
+        }
+        catch (const std::exception& exception)
+        {
+            SetStatusText("Invalid /rules response: " +
+                              wxString::FromUTF8(exception.what()),
+                          2);
+        }
+    }
+}
+
 void MainFrame::OnConnectApi(wxCommandEvent&)
 {
     corePath_ = corePathText_ ? corePathText_->GetValue().ToStdString() : std::string{};
     dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : std::string{};
     configPath_ = configPathText_ ? configPathText_->GetValue().ToStdString() : configPath_;
-    if (configPath_.empty())
-        configPath_ = wxFileName(wxString::FromUTF8(dataPath_), "config.yaml")
-                          .GetFullPath().ToStdString();
+
+    auto controller = mihomoConfig_.externalController;
+    if (controller.rfind("http://", 0) != 0)
+        controller = "http://" + controller;
+    apiClient_.SetBaseUrl(controller);
+    apiClient_.SetSecret(mihomoConfig_.secret);
+    apiClient_.SetTimeoutMs(1000);
+
     std::string startError;
-    if (!mihomoSidecar_.Start(corePath_, dataPath_, configPath_, mihomoConfig_,
+    if (!mihomoSidecar_.Start(corePath_, dataPath_, configPath_,
                               apiClient_, startError))
     {
         std::cerr << "[WxClash] Sidecar error: " << startError << std::endl;
@@ -509,6 +720,20 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
         SetStatusText("API error: " + wxString::FromUTF8(response.error), 2);
         return;
     }
+    try
+    {
+        const auto version = YAML::Load(response.body)["version"];
+        if (version)
+            SetStatusText("Mihomo " + wxString::FromUTF8(version.as<std::string>()), 0);
+    }
+    catch (...)
+    {
+        // A successful controller response is still useful even if its
+        // optional version payload cannot be decoded.
+    }
+    hasTrafficSample_ = false;
+    RefreshCoreData();
+    monitorTimer_.Start(1000);
     SetStatusText("API connected", 2);
 }
 
@@ -550,38 +775,18 @@ void MainFrame::OnBrowseConfig(wxCommandEvent&)
     if (dialog.ShowModal() != wxID_OK)
         return;
 
+    std::string error;
+    if (!mihomoConfig_.Load(dialog.GetPath().ToStdString(), error))
+    {
+        SetStatusText(wxString::FromUTF8(error), 2);
+        return;
+    }
+    configPath_ = dialog.GetPath().ToStdString();
     if (configPathText_)
-    {
         configPathText_->SetValue(dialog.GetPath());
-        configPath_ = dialog.GetPath().ToStdString();
-    }
-
-    dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : dataPath_;
-    const wxString dataDirectory = wxString::FromUTF8(dataPath_);
-    if (dataDirectory.empty() ||
-        (!wxFileName::Mkdir(dataDirectory, 0700, wxPATH_MKDIR_FULL) &&
-         !wxDir::Exists(dataDirectory)))
-    {
-        const std::string error = "Unable to create WxClash data directory";
-        std::cerr << "[WxClash] " << error << std::endl;
-        SetStatusText(wxString::FromUTF8(error), 2);
-        return;
-    }
-
-    const wxFileName source(dialog.GetPath());
-    const wxFileName destination(dataDirectory, source.GetFullName());
-    if (!wxCopyFile(source.GetFullPath(), destination.GetFullPath(), true))
-    {
-        const std::string error = "Unable to copy mihomo config to data directory";
-        std::cerr << "[WxClash] " << error << ": "
-                  << destination.GetFullPath().ToStdString() << std::endl;
-        SetStatusText(wxString::FromUTF8(error), 2);
-        return;
-    }
-
-    std::cerr << "[WxClash] Imported mihomo config: "
-              << destination.GetFullPath().ToStdString() << std::endl;
-    SetStatusText("Config imported: " + destination.GetFullName(), 2);
+    UpdateMihomoControls();
+    SaveSettings(corePath_, dataPath_, configPath_);
+    SetStatusText("Config imported: " + dialog.GetFilename(), 2);
 }
 
 void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
@@ -619,8 +824,16 @@ void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
     if (mihomoConfig_.dnsNameservers.empty())
         mihomoConfig_.dnsNameservers = {"223.5.5.5", "8.8.8.8"};
 
-    const auto path = wxFileName(wxString::FromUTF8(dataPath_), "config.yaml")
-                          .GetFullPath().ToStdString();
+    const wxFileName currentPath(configPathText_ ? configPathText_->GetValue()
+                                                  : wxString::FromUTF8(configPath_));
+    wxFileDialog dialog(this, "Save mihomo config", currentPath.GetPath(),
+                        currentPath.GetFullName(),
+                        "YAML files (*.yaml;*.yml)|*.yaml;*.yml|All files|*.*",
+                        wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    if (dialog.ShowModal() != wxID_OK)
+        return;
+
+    const auto path = dialog.GetPath().ToStdString();
     std::string error;
     if (!mihomoConfig_.Save(path, error))
     {
@@ -628,9 +841,35 @@ void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
         SetStatusText(wxString::FromUTF8(error), 2);
         return;
     }
+    configPath_ = path;
     if (configPathText_)
-        configPath_ = configPathText_->GetValue().ToStdString();
+        configPathText_->SetValue(dialog.GetPath());
     SaveSettings(corePath_, dataPath_, configPath_);
     std::cerr << "[WxClash] Saved mihomo config: " << path << std::endl;
     SetStatusText("Mihomo config saved", 2);
+}
+
+void MainFrame::UpdateMihomoControls()
+{
+    const auto selectChoice = [](wxChoice* choice, const std::string& value) {
+        const int index = choice->FindString(wxString::FromUTF8(value));
+        choice->SetSelection(index == wxNOT_FOUND ? 0 : index);
+    };
+    selectChoice(mihomoModeChoice_, mihomoConfig_.mode);
+    selectChoice(mihomoLogLevelChoice_, mihomoConfig_.logLevel);
+    selectChoice(tunStackChoice_, mihomoConfig_.tunStack);
+    selectChoice(dnsModeChoice_, mihomoConfig_.dnsEnhancedMode);
+    mixedPortText_->SetValue(std::to_string(mihomoConfig_.mixedPort));
+    httpPortText_->SetValue(std::to_string(mihomoConfig_.httpPort));
+    socksPortText_->SetValue(std::to_string(mihomoConfig_.socksPort));
+    controllerText_->SetValue(wxString::FromUTF8(mihomoConfig_.externalController));
+    secretText_->SetValue(wxString::FromUTF8(mihomoConfig_.secret));
+    allowLanCheck_->SetValue(mihomoConfig_.allowLan);
+    ipv6Check_->SetValue(mihomoConfig_.ipv6);
+    tunEnableCheck_->SetValue(mihomoConfig_.tunEnable);
+    dnsEnableCheck_->SetValue(mihomoConfig_.dnsEnable);
+    wxString nameservers;
+    for (const auto& nameserver : mihomoConfig_.dnsNameservers)
+        nameservers += wxString::FromUTF8(nameserver) + "\n";
+    nameserverText_->SetValue(nameservers);
 }

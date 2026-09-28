@@ -1,8 +1,6 @@
 #include "mihomo_sidecar.h"
 
 #include "../api/mihomo_api_client.h"
-#include "../config/app_config.h"
-
 #include <wx/dir.h>
 #include <wx/ffile.h>
 #include <wx/filefn.h>
@@ -58,37 +56,9 @@ MihomoSidecar::~MihomoSidecar()
     Stop();
 }
 
-std::string MihomoSidecar::PrepareConfig(const std::string& dataPath,
-                                         const std::string& configPath,
-                                         const MihomoConfig& mihomoConfig,
-                                         std::string& error) const
-{
-    const auto dataDirectory = ToWx(dataPath);
-    if (dataDirectory.empty())
-    {
-        error = "WxClash data directory is empty";
-        return {};
-    }
-    if (!MakeDirectory(dataDirectory))
-    {
-        error = "Unable to create WxClash data directory";
-        return {};
-    }
-
-    const wxFileName runtimeFile(dataDirectory, "mihomo-runtime.yaml");
-    const auto runtimePath = std::string(runtimeFile.GetFullPath().utf8_str());
-    if (!mihomoConfig.GenerateRuntimeConfig(
-            configPath, runtimePath, "127.0.0.1:9090", "123456", error))
-    {
-        return {};
-    }
-    return runtimePath;
-}
-
 bool MihomoSidecar::Start(const std::string& corePath,
                           const std::string& dataPath,
                           const std::string& configPath,
-                          const MihomoConfig& mihomoConfig,
                           const MihomoApiClient& apiClient,
                           std::string& error)
 {
@@ -104,16 +74,19 @@ bool MihomoSidecar::Start(const std::string& corePath,
         return Fail(error, "mihomo core is not executable");
 #endif
 
-    const auto config = PrepareConfig(dataPath, configPath, mihomoConfig, error);
-    if (config.empty())
-        return false;
+    if (dataPath.empty())
+        return Fail(error, "WxClash data directory is empty");
+    if (!MakeDirectory(ToWx(dataPath)))
+        return Fail(error, "Unable to create WxClash data directory");
+    if (configPath.empty() || !wxFileName::FileExists(ToWx(configPath)))
+        return Fail(error, "mihomo config path is empty or does not exist");
 
     const auto Quote = [](const wxString& value) {
         return wxString('"') + value + wxString('"');
     };
     const wxString command = Quote(core) + " -d " +
                              Quote(ToWx(dataPath)) +
-                             " -f " + Quote(ToWx(config));
+                             " -f " + Quote(ToWx(configPath));
 
     process_ = std::make_unique<wxProcess>(nullptr);
     process_->Redirect();
@@ -158,7 +131,7 @@ void MihomoSidecar::Stop()
 }
 
 void MihomoSidecar::DrainStream(wxInputStream* stream, std::string& pending,
-                                const char* label)
+                                const char* label, bool mirrorToConsole)
 {
     if (!stream)
         return;
@@ -179,8 +152,11 @@ void MihomoSidecar::DrainStream(wxInputStream* stream, std::string& pending,
             pending.erase(0, newline + 1);
             if (!line.empty() && line.back() == '\r')
                 line.pop_back();
+            const auto message = std::string(label) + " " + line;
             if (outputCallback_)
-                outputCallback_(std::string(label) + " " + line);
+                outputCallback_(message);
+            if (mirrorToConsole)
+                std::cerr << message << std::endl;
         }
     }
 }
@@ -192,9 +168,12 @@ void MihomoSidecar::FlushPendingOutput()
         outputCallback_("[mihomo stdout] " + stdoutPending_);
         stdoutPending_.clear();
     }
-    if (outputCallback_ && !stderrPending_.empty())
+    if (!stderrPending_.empty())
     {
-        outputCallback_("[mihomo stderr] " + stderrPending_);
+        const auto message = "[mihomo stderr] " + stderrPending_;
+        if (outputCallback_)
+            outputCallback_(message);
+        std::cerr << message << std::endl;
         stderrPending_.clear();
     }
 }
@@ -204,6 +183,6 @@ void MihomoSidecar::PollOutput()
     if (!process_)
         return;
 
-    DrainStream(process_->GetInputStream(), stdoutPending_, "[mihomo stdout]");
-    DrainStream(process_->GetErrorStream(), stderrPending_, "[mihomo stderr]");
+    DrainStream(process_->GetInputStream(), stdoutPending_, "[mihomo stdout]", false);
+    DrainStream(process_->GetErrorStream(), stderrPending_, "[mihomo stderr]", true);
 }

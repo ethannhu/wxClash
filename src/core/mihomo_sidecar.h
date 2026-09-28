@@ -8,7 +8,6 @@
 #include <wx/process.h>
 
 class MihomoApiClient;
-struct MihomoConfig;
 class wxInputStream;
 
 class MihomoSidecar final
@@ -25,7 +24,6 @@ public:
     bool Start(const std::string& corePath,
                const std::string& dataPath,
                const std::string& configPath,
-               const MihomoConfig& mihomoConfig,
                const MihomoApiClient& apiClient,
                std::string& error);
     void Stop();
@@ -37,12 +35,8 @@ public:
     bool IsRunning() const { return pid_ > 0; }
 
 private:
-    std::string PrepareConfig(const std::string& dataPath,
-                              const std::string& configPath,
-                              const MihomoConfig& mihomoConfig,
-                              std::string& error) const;
     void DrainStream(wxInputStream* stream, std::string& pending,
-                     const char* label);
+                     const char* label, bool mirrorToConsole);
     void FlushPendingOutput();
 
     long pid_ = -1;

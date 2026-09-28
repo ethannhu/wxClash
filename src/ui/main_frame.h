@@ -3,12 +3,16 @@
 #include <wx/frame.h>
 #include <wx/timer.h>
 
+#include <cstdint>
+
 #include "../api/mihomo_api_client.h"
 #include "../config/app_config.h"
 #include "../core/mihomo_sidecar.h"
 
 class wxCheckBox;
 class wxChoice;
+class wxDataViewListCtrl;
+class wxListBox;
 class wxSimplebook;
 class wxSizer;
 class wxStaticText;
@@ -42,14 +46,26 @@ private:
     void OnModeChanged(wxCommandEvent& event);
     void OnConnectApi(wxCommandEvent& event);
     void OnSidecarOutput(wxTimerEvent& event);
+    void OnMonitorTimer(wxTimerEvent& event);
     void OnBrowseCore(wxCommandEvent& event);
     void OnBrowseDataPath(wxCommandEvent& event);
     void OnBrowseConfig(wxCommandEvent& event);
     void OnSaveMihomoConfig(wxCommandEvent& event);
+    void UpdateMihomoControls();
+    void RefreshCoreData();
 
     wxSimplebook* book_ = nullptr;
     wxChoice* modeChoice_ = nullptr;
     wxTextCtrl* logText_ = nullptr;
+    wxStaticText* downloadMetric_ = nullptr;
+    wxStaticText* uploadMetric_ = nullptr;
+    wxStaticText* activeConnectionsMetric_ = nullptr;
+    wxStaticText* memoryMetric_ = nullptr;
+    wxStaticText* trafficSummary_ = nullptr;
+    wxDataViewListCtrl* proxyTable_ = nullptr;
+    wxListBox* proxyGroups_ = nullptr;
+    wxDataViewListCtrl* connectionTable_ = nullptr;
+    wxDataViewListCtrl* ruleTable_ = nullptr;
     wxTextCtrl* corePathText_ = nullptr;
     wxTextCtrl* dataPathText_ = nullptr;
     wxTextCtrl* configPathText_ = nullptr;
@@ -74,6 +90,10 @@ private:
     MihomoApiClient apiClient_;
     MihomoSidecar mihomoSidecar_;
     wxTimer sidecarOutputTimer_;
+    wxTimer monitorTimer_;
+    std::uint64_t lastDownloadTotal_ = 0;
+    std::uint64_t lastUploadTotal_ = 0;
+    bool hasTrafficSample_ = false;
 
     wxDECLARE_EVENT_TABLE();
 };

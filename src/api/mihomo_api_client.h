@@ -24,6 +24,8 @@ class MihomoApiClient final
 public:
     explicit MihomoApiClient(MihomoApiConfig config = {});
 
+    void SetBaseUrl(std::string baseUrl) { config_.baseUrl = std::move(baseUrl); }
+    void SetSecret(std::string secret) { config_.secret = std::move(secret); }
     void SetTimeoutMs(int timeoutMs) { config_.timeoutMs = timeoutMs; }
 
     void SetDebugCallback(std::function<void(const std::string&)> callback)
@@ -41,6 +43,7 @@ public:
     MihomoApiResponse GetTraffic() const { return Request("GET", "/traffic"); }
     MihomoApiResponse GetMemory() const { return Request("GET", "/memory"); }
     MihomoApiResponse GetConnections() const { return Request("GET", "/connections"); }
+    MihomoApiResponse GetRules() const { return Request("GET", "/rules"); }
     MihomoApiResponse Restart() const { return Request("POST", "/restart"); }
 
 private:

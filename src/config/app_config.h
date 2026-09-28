@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include <yaml-cpp/yaml.h>
+
 struct MihomoConfig
 {
     std::string mode = "rule";
@@ -24,9 +26,9 @@ struct MihomoConfig
 
     bool Load(const std::string& path, std::string& error);
     bool Save(const std::string& path, std::string& error) const;
-    bool GenerateRuntimeConfig(const std::string& sourcePath,
-                               const std::string& runtimePath,
-                               const std::string& externalController,
-                               const std::string& secret,
-                               std::string& error) const;
+
+private:
+    // Keep options not represented by the current UI (for example proxies,
+    // rules and proxy-groups) when an imported configuration is saved.
+    YAML::Node sourceConfig_;
 };

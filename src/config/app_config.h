@@ -24,4 +24,9 @@ struct MihomoConfig
 
     bool Load(const std::string& path, std::string& error);
     bool Save(const std::string& path, std::string& error) const;
+    bool GenerateRuntimeConfig(const std::string& sourcePath,
+                               const std::string& runtimePath,
+                               const std::string& externalController,
+                               const std::string& secret,
+                               std::string& error) const;
 };

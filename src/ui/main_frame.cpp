@@ -489,8 +489,13 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
 {
     corePath_ = corePathText_ ? corePathText_->GetValue().ToStdString() : std::string{};
     dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : std::string{};
+    configPath_ = configPathText_ ? configPathText_->GetValue().ToStdString() : configPath_;
+    if (configPath_.empty())
+        configPath_ = wxFileName(wxString::FromUTF8(dataPath_), "config.yaml")
+                          .GetFullPath().ToStdString();
     std::string startError;
-    if (!mihomoSidecar_.Start(corePath_, dataPath_, apiClient_, startError))
+    if (!mihomoSidecar_.Start(corePath_, dataPath_, configPath_, mihomoConfig_,
+                              apiClient_, startError))
     {
         std::cerr << "[WxClash] Sidecar error: " << startError << std::endl;
         SetStatusText("Sidecar error: " + wxString::FromUTF8(startError), 2);

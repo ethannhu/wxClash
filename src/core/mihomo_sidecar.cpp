@@ -1,6 +1,7 @@
 #include "mihomo_sidecar.h"
 
 #include "../api/mihomo_api_client.h"
+#include "../config/app_config.h"
 
 #include <wx/dir.h>
 #include <wx/ffile.h>
@@ -58,6 +59,8 @@ MihomoSidecar::~MihomoSidecar()
 }
 
 std::string MihomoSidecar::PrepareConfig(const std::string& dataPath,
+                                         const std::string& configPath,
+                                         const MihomoConfig& mihomoConfig,
                                          std::string& error) const
 {
     const auto dataDirectory = ToWx(dataPath);
@@ -72,27 +75,20 @@ std::string MihomoSidecar::PrepareConfig(const std::string& dataPath,
         return {};
     }
 
-    const wxFileName configPath(dataDirectory, "mihomo-runtime.yaml");
-    const wxString config =
-        "mode: rule\n"
-        "log-level: info\n"
-        "allow-lan: false\n"
-        "external-controller: 127.0.0.1:9090\n"
-        "secret: \"123456\"\n"
-        "rules:\n"
-        "  - MATCH,DIRECT\n";
-
-    wxFFile file(configPath.GetFullPath(), "w");
-    if (!file.IsOpened() || !file.Write(config) || !file.Close())
+    const wxFileName runtimeFile(dataDirectory, "mihomo-runtime.yaml");
+    const auto runtimePath = std::string(runtimeFile.GetFullPath().utf8_str());
+    if (!mihomoConfig.GenerateRuntimeConfig(
+            configPath, runtimePath, "127.0.0.1:9090", "123456", error))
     {
-        error = "Unable to write mihomo runtime config";
         return {};
     }
-    return std::string(configPath.GetFullPath().utf8_str());
+    return runtimePath;
 }
 
 bool MihomoSidecar::Start(const std::string& corePath,
                           const std::string& dataPath,
+                          const std::string& configPath,
+                          const MihomoConfig& mihomoConfig,
                           const MihomoApiClient& apiClient,
                           std::string& error)
 {
@@ -108,7 +104,7 @@ bool MihomoSidecar::Start(const std::string& corePath,
         return Fail(error, "mihomo core is not executable");
 #endif
 
-    const auto config = PrepareConfig(dataPath, error);
+    const auto config = PrepareConfig(dataPath, configPath, mihomoConfig, error);
     if (config.empty())
         return false;
 

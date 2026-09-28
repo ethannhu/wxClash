@@ -39,14 +39,31 @@ namespace
     }
 }
 
+std::string MihomoSidecar::DefaultDataPath()
+{
+#ifdef __WXMSW__
+    const auto path = wxFileName(wxStandardPaths::Get().GetUserConfigDir(),
+                                 "WxClash").GetFullPath();
+#else
+    const auto path = wxFileName(wxGetHomeDir(), ".wxclash").GetFullPath();
+#endif
+    return std::string(path.utf8_str());
+}
+
 MihomoSidecar::~MihomoSidecar()
 {
     Stop();
 }
 
-std::string MihomoSidecar::PrepareConfig(std::string& error) const
+std::string MihomoSidecar::PrepareConfig(const std::string& dataPath,
+                                         std::string& error) const
 {
-    const auto dataDirectory = wxStandardPaths::Get().GetUserLocalDataDir();
+    const auto dataDirectory = ToWx(dataPath);
+    if (dataDirectory.empty())
+    {
+        error = "WxClash data directory is empty";
+        return {};
+    }
     if (!MakeDirectory(dataDirectory))
     {
         error = "Unable to create WxClash data directory";
@@ -73,6 +90,7 @@ std::string MihomoSidecar::PrepareConfig(std::string& error) const
 }
 
 bool MihomoSidecar::Start(const std::string& corePath,
+                          const std::string& dataPath,
                           const MihomoApiClient& apiClient,
                           std::string& error)
 {
@@ -88,7 +106,7 @@ bool MihomoSidecar::Start(const std::string& corePath,
         return Fail(error, "mihomo core is not executable");
 #endif
 
-    const auto config = PrepareConfig(error);
+    const auto config = PrepareConfig(dataPath, error);
     if (config.empty())
         return false;
 
@@ -96,7 +114,7 @@ bool MihomoSidecar::Start(const std::string& corePath,
         return wxString('"') + value + wxString('"');
     };
     const wxString command = Quote(core) + " -d " +
-                             Quote(wxStandardPaths::Get().GetUserLocalDataDir()) +
+                             Quote(ToWx(dataPath)) +
                              " -f " + Quote(ToWx(config));
 
     pid_ = wxExecute(command, wxEXEC_ASYNC);

@@ -3,17 +3,22 @@
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
+#include <wx/dir.h>
+#include <wx/dirdlg.h>
 #include <wx/filedlg.h>
+#include <wx/ffile.h>
 #include <wx/dataview.h>
 #include <wx/listbox.h>
 #include <wx/notebook.h>
 #include <wx/panel.h>
+#include <wx/filename.h>
 #include <wx/srchctrl.h>
 #include <wx/simplebook.h>
 #include <wx/sizer.h>
 #include <wx/statbox.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
+#include <wx/tokenzr.h>
 
 #include <iostream>
 
@@ -22,6 +27,51 @@ namespace
     constexpr int kSpacing = 8;
     constexpr int kPadding = 12;
     constexpr int kNavigationWidth = 150;
+
+    wxString SettingsPath()
+    {
+        const auto directory = wxString::FromUTF8(MihomoSidecar::DefaultDataPath());
+        wxFileName::Mkdir(directory, 0700, wxPATH_MKDIR_FULL);
+        return wxFileName(directory, "settings.conf").GetFullPath();
+    }
+
+    void LoadSettings(std::string& corePath, std::string& dataPath)
+    {
+        wxFFile file(SettingsPath(), "r");
+        if (!file.IsOpened())
+            return;
+
+        wxString contents;
+        if (!file.ReadAll(&contents))
+            return;
+
+        wxStringTokenizer lines(contents, "\n", wxTOKEN_RET_EMPTY_ALL);
+        while (lines.HasMoreTokens())
+        {
+            const auto line = lines.GetNextToken();
+            if (line.StartsWith("core_path="))
+                corePath = line.Mid(10).ToStdString();
+            else if (line.StartsWith("data_path="))
+                dataPath = line.Mid(10).ToStdString();
+        }
+    }
+
+    void SaveSettings(const std::string& corePath, const std::string& dataPath)
+    {
+        wxFFile file(SettingsPath(), "w");
+        if (!file.IsOpened())
+        {
+            std::cerr << "[WxClash] Unable to open settings file for writing"
+                      << std::endl;
+            return;
+        }
+
+        const wxString contents = "core_path=" + wxString::FromUTF8(corePath) +
+                                  "\ndata_path=" + wxString::FromUTF8(dataPath) +
+                                  "\n";
+        if (!file.Write(contents) || !file.Close())
+            std::cerr << "[WxClash] Unable to write settings file" << std::endl;
+    }
 
     wxStaticText *AddMetric(wxWindow *parent, wxSizer *sizer,
                             const wxString &title, const wxString &value)
@@ -60,6 +110,8 @@ namespace
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_BUTTON(wxID_HIGHEST + 4, MainFrame::OnConnectApi)
     EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
+    EVT_BUTTON(wxID_HIGHEST + 6, MainFrame::OnBrowseDataPath)
+    EVT_BUTTON(wxID_HIGHEST + 7, MainFrame::OnImportConfig)
     EVT_BUTTON(wxID_ANY, MainFrame::OnNavigation)
         EVT_CHOICE(wxID_ANY, MainFrame::OnModeChanged)
             wxEND_EVENT_TABLE()
@@ -68,6 +120,10 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     : wxFrame(nullptr, wxID_ANY, "WxClash", wxDefaultPosition, wxSize(1100, 700),
               wxDEFAULT_FRAME_STYLE)
 {
+    LoadSettings(corePath_, dataPath_);
+    if (dataPath_.empty())
+        dataPath_ = MihomoSidecar::DefaultDataPath();
+
     apiClient_.SetDebugCallback([this](const std::string& message) {
         if (logText_)
             logText_->AppendText(wxString::FromUTF8(message) + "\n\n");
@@ -93,6 +149,7 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
 
 MainFrame::~MainFrame()
 {
+    SaveSettings(corePath_, dataPath_);
     mihomoSidecar_.Stop();
 }
 
@@ -246,6 +303,20 @@ void MainFrame::BuildPages()
     corePathSizer->Add(new wxButton(connectionPage, wxID_HIGHEST + 5, "Browse..."),
                        0, wxEXPAND);
     connectionForm->Add(corePathSizer, 1, wxEXPAND);
+    connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "App data directory"));
+    auto *dataPathSizer = new wxBoxSizer(wxHORIZONTAL);
+    dataPathText_ = new wxTextCtrl(connectionPage, wxID_ANY,
+                                    wxString::FromUTF8(dataPath_),
+                                    wxDefaultPosition, wxDefaultSize,
+                                    wxTE_PROCESS_ENTER);
+    dataPathSizer->Add(dataPathText_, 1, wxEXPAND | wxRIGHT, kSpacing);
+    dataPathSizer->Add(new wxButton(connectionPage, wxID_HIGHEST + 6, "Browse..."),
+                        0, wxEXPAND);
+    connectionForm->Add(dataPathSizer, 1, wxEXPAND);
+    connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "Mihomo config"));
+    auto *importConfigButton = new wxButton(connectionPage, wxID_HIGHEST + 7,
+                                            "Import config...");
+    connectionForm->Add(importConfigButton, 1, wxEXPAND);
     connectionForm->AddGrowableCol(1, 1);
     connectionPage->SetSizer(connectionForm);
     notebook->AddPage(connectionPage, "Connection");
@@ -286,8 +357,9 @@ void MainFrame::OnModeChanged(wxCommandEvent &event)
 void MainFrame::OnConnectApi(wxCommandEvent&)
 {
     corePath_ = corePathText_ ? corePathText_->GetValue().ToStdString() : std::string{};
+    dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : std::string{};
     std::string startError;
-    if (!mihomoSidecar_.Start(corePath_, apiClient_, startError))
+    if (!mihomoSidecar_.Start(corePath_, dataPath_, apiClient_, startError))
     {
         std::cerr << "[WxClash] Sidecar error: " << startError << std::endl;
         SetStatusText("Sidecar error: " + wxString::FromUTF8(startError), 2);
@@ -315,4 +387,55 @@ void MainFrame::OnBrowseCore(wxCommandEvent&)
         if (corePathText_)
             corePathText_->SetValue(dialog.GetPath());
     }
+}
+
+void MainFrame::OnBrowseDataPath(wxCommandEvent&)
+{
+    const wxString currentPath = dataPathText_ ? dataPathText_->GetValue() : wxString{};
+    wxDirDialog dialog(this, "Select WxClash data directory",
+                       currentPath,
+                       wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
+    if (dialog.ShowModal() == wxID_OK)
+    {
+        dataPath_ = dialog.GetPath().ToStdString();
+        if (dataPathText_)
+            dataPathText_->SetValue(dialog.GetPath());
+    }
+}
+
+void MainFrame::OnImportConfig(wxCommandEvent&)
+{
+    wxFileDialog dialog(this, "Import mihomo config", wxEmptyString,
+                        wxEmptyString,
+                        "YAML files (*.yaml;*.yml)|*.yaml;*.yml|All files|*.*",
+                        wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (dialog.ShowModal() != wxID_OK)
+        return;
+
+    dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : dataPath_;
+    const wxString dataDirectory = wxString::FromUTF8(dataPath_);
+    if (dataDirectory.empty() ||
+        (!wxFileName::Mkdir(dataDirectory, 0700, wxPATH_MKDIR_FULL) &&
+         !wxDir::Exists(dataDirectory)))
+    {
+        const std::string error = "Unable to create WxClash data directory";
+        std::cerr << "[WxClash] " << error << std::endl;
+        SetStatusText(wxString::FromUTF8(error), 2);
+        return;
+    }
+
+    const wxFileName source(dialog.GetPath());
+    const wxFileName destination(dataDirectory, source.GetFullName());
+    if (!wxCopyFile(source.GetFullPath(), destination.GetFullPath(), true))
+    {
+        const std::string error = "Unable to copy mihomo config to data directory";
+        std::cerr << "[WxClash] " << error << ": "
+                  << destination.GetFullPath().ToStdString() << std::endl;
+        SetStatusText(wxString::FromUTF8(error), 2);
+        return;
+    }
+
+    std::cerr << "[WxClash] Imported mihomo config: "
+              << destination.GetFullPath().ToStdString() << std::endl;
+    SetStatusText("Config imported: " + destination.GetFullName(), 2);
 }

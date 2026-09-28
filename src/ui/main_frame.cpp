@@ -113,6 +113,7 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
     EVT_BUTTON(wxID_HIGHEST + 6, MainFrame::OnBrowseDataPath)
     EVT_BUTTON(wxID_HIGHEST + 7, MainFrame::OnImportConfig)
+    EVT_BUTTON(wxID_HIGHEST + 9, MainFrame::OnSaveMihomoConfig)
     EVT_BUTTON(wxID_ANY, MainFrame::OnNavigation)
         EVT_CHOICE(wxID_ANY, MainFrame::OnModeChanged)
             wxEND_EVENT_TABLE()
@@ -125,6 +126,11 @@ MainFrame::MainFrame()
     LoadSettings(corePath_, dataPath_);
     if (dataPath_.empty())
         dataPath_ = MihomoSidecar::DefaultDataPath();
+    std::string configError;
+    const auto configPath = wxFileName(wxString::FromUTF8(dataPath_), "config.yaml")
+                                .GetFullPath().ToStdString();
+    if (!mihomoConfig_.Load(configPath, configError))
+        std::cerr << "[WxClash] " << configError << std::endl;
 
     apiClient_.SetDebugCallback([this](const std::string& message) {
         if (logText_)
@@ -339,6 +345,102 @@ void MainFrame::BuildPages()
                                        "Runtime configuration will be editable after /configs is connected."));
     runtimePage->SetSizer(runtimeSizer);
     notebook->AddPage(runtimePage, "Runtime");
+
+    auto *mihomoPage = new wxPanel(notebook);
+    auto *mihomoForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
+    mihomoModeChoice_ = new wxChoice(mihomoPage, wxID_ANY);
+    mihomoModeChoice_->Append("Rule");
+    mihomoModeChoice_->Append("Global");
+    mihomoModeChoice_->Append("Direct");
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "Mode"));
+    mihomoForm->Add(mihomoModeChoice_, 1, wxEXPAND);
+
+    mixedPortText_ = new wxTextCtrl(mihomoPage, wxID_ANY);
+    httpPortText_ = new wxTextCtrl(mihomoPage, wxID_ANY);
+    socksPortText_ = new wxTextCtrl(mihomoPage, wxID_ANY);
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "Mixed port"));
+    mihomoForm->Add(mixedPortText_, 1, wxEXPAND);
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "HTTP port"));
+    mihomoForm->Add(httpPortText_, 1, wxEXPAND);
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "SOCKS port"));
+    mihomoForm->Add(socksPortText_, 1, wxEXPAND);
+
+    controllerText_ = new wxTextCtrl(mihomoPage, wxID_ANY);
+    secretText_ = new wxTextCtrl(mihomoPage, wxID_ANY, wxEmptyString,
+                                 wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "External controller"));
+    mihomoForm->Add(controllerText_, 1, wxEXPAND);
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "Secret"));
+    mihomoForm->Add(secretText_, 1, wxEXPAND);
+
+    mihomoLogLevelChoice_ = new wxChoice(mihomoPage, wxID_ANY);
+    for (const auto& level : {"silent", "error", "warning", "info", "debug", "trace"})
+        mihomoLogLevelChoice_->Append(level);
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "Log level"));
+    mihomoForm->Add(mihomoLogLevelChoice_, 1, wxEXPAND);
+
+    allowLanCheck_ = new wxCheckBox(mihomoPage, wxID_ANY, "Allow LAN connections");
+    ipv6Check_ = new wxCheckBox(mihomoPage, wxID_ANY, "Enable IPv6");
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "Network"));
+    auto *networkChecks = new wxBoxSizer(wxHORIZONTAL);
+    networkChecks->Add(allowLanCheck_, 0, wxRIGHT, kSpacing * 2);
+    networkChecks->Add(ipv6Check_, 0);
+    mihomoForm->Add(networkChecks, 1, wxEXPAND);
+
+    tunEnableCheck_ = new wxCheckBox(mihomoPage, wxID_ANY, "Enable TUN");
+    tunStackChoice_ = new wxChoice(mihomoPage, wxID_ANY);
+    for (const auto& stack : {"gvisor", "system", "mixed"})
+        tunStackChoice_->Append(stack);
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "TUN"));
+    auto *tunControls = new wxBoxSizer(wxHORIZONTAL);
+    tunControls->Add(tunEnableCheck_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, kSpacing * 2);
+    tunControls->Add(tunStackChoice_, 1, wxEXPAND);
+    mihomoForm->Add(tunControls, 1, wxEXPAND);
+
+    dnsEnableCheck_ = new wxCheckBox(mihomoPage, wxID_ANY, "Enable DNS");
+    dnsModeChoice_ = new wxChoice(mihomoPage, wxID_ANY);
+    dnsModeChoice_->Append("fake-ip");
+    dnsModeChoice_->Append("redir-host");
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "DNS"));
+    auto *dnsControls = new wxBoxSizer(wxHORIZONTAL);
+    dnsControls->Add(dnsEnableCheck_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, kSpacing * 2);
+    dnsControls->Add(dnsModeChoice_, 1, wxEXPAND);
+    mihomoForm->Add(dnsControls, 1, wxEXPAND);
+
+    nameserverText_ = new wxTextCtrl(mihomoPage, wxID_ANY, wxEmptyString,
+                                     wxDefaultPosition, wxDefaultSize,
+                                     wxTE_MULTILINE);
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "DNS nameservers"));
+    mihomoForm->Add(nameserverText_, 1, wxEXPAND);
+    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, wxEmptyString));
+    mihomoForm->Add(new wxButton(mihomoPage, wxID_HIGHEST + 9, "Save mihomo config"),
+                     0, wxALIGN_RIGHT);
+    mihomoForm->AddGrowableCol(1, 1);
+    mihomoForm->AddGrowableRow(10, 1);
+    mihomoPage->SetSizer(mihomoForm);
+    notebook->AddPage(mihomoPage, "Mihomo");
+
+    const auto selectChoice = [](wxChoice* choice, const std::string& value) {
+        const int index = choice->FindString(wxString::FromUTF8(value));
+        choice->SetSelection(index == wxNOT_FOUND ? 0 : index);
+    };
+    selectChoice(mihomoModeChoice_, mihomoConfig_.mode);
+    selectChoice(mihomoLogLevelChoice_, mihomoConfig_.logLevel);
+    selectChoice(tunStackChoice_, mihomoConfig_.tunStack);
+    selectChoice(dnsModeChoice_, mihomoConfig_.dnsEnhancedMode);
+    mixedPortText_->SetValue(std::to_string(mihomoConfig_.mixedPort));
+    httpPortText_->SetValue(std::to_string(mihomoConfig_.httpPort));
+    socksPortText_->SetValue(std::to_string(mihomoConfig_.socksPort));
+    controllerText_->SetValue(wxString::FromUTF8(mihomoConfig_.externalController));
+    secretText_->SetValue(wxString::FromUTF8(mihomoConfig_.secret));
+    allowLanCheck_->SetValue(mihomoConfig_.allowLan);
+    ipv6Check_->SetValue(mihomoConfig_.ipv6);
+    tunEnableCheck_->SetValue(mihomoConfig_.tunEnable);
+    dnsEnableCheck_->SetValue(mihomoConfig_.dnsEnable);
+    wxString nameservers;
+    for (const auto& nameserver : mihomoConfig_.dnsNameservers)
+        nameservers += wxString::FromUTF8(nameserver) + "\n";
+    nameserverText_->SetValue(nameservers);
     settingsSizer->Add(notebook, 1, wxEXPAND);
 
     if (!corePath_.empty())
@@ -451,4 +553,53 @@ void MainFrame::OnImportConfig(wxCommandEvent&)
     std::cerr << "[WxClash] Imported mihomo config: "
               << destination.GetFullPath().ToStdString() << std::endl;
     SetStatusText("Config imported: " + destination.GetFullName(), 2);
+}
+
+void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
+{
+    dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : dataPath_;
+    mihomoConfig_.mode = mihomoModeChoice_->GetStringSelection().ToStdString();
+    mihomoConfig_.logLevel = mihomoLogLevelChoice_->GetStringSelection().ToStdString();
+    mihomoConfig_.tunStack = tunStackChoice_->GetStringSelection().ToStdString();
+    mihomoConfig_.dnsEnhancedMode = dnsModeChoice_->GetStringSelection().ToStdString();
+    mihomoConfig_.externalController = controllerText_->GetValue().ToStdString();
+    mihomoConfig_.secret = secretText_->GetValue().ToStdString();
+    mihomoConfig_.allowLan = allowLanCheck_->GetValue();
+    mihomoConfig_.ipv6 = ipv6Check_->GetValue();
+    mihomoConfig_.tunEnable = tunEnableCheck_->GetValue();
+    mihomoConfig_.dnsEnable = dnsEnableCheck_->GetValue();
+
+    const auto readPort = [](wxTextCtrl* control, int current) {
+        long value = 0;
+        return control->GetValue().ToLong(&value) && value >= 0 && value <= 65535
+                   ? static_cast<int>(value)
+                   : current;
+    };
+    mihomoConfig_.mixedPort = readPort(mixedPortText_, mihomoConfig_.mixedPort);
+    mihomoConfig_.httpPort = readPort(httpPortText_, mihomoConfig_.httpPort);
+    mihomoConfig_.socksPort = readPort(socksPortText_, mihomoConfig_.socksPort);
+
+    mihomoConfig_.dnsNameservers.clear();
+    wxStringTokenizer tokens(nameserverText_->GetValue(), "\n", wxTOKEN_STRTOK);
+    while (tokens.HasMoreTokens())
+    {
+        const auto value = tokens.GetNextToken().Trim(true).Trim(false);
+        if (!value.empty())
+            mihomoConfig_.dnsNameservers.push_back(value.ToStdString());
+    }
+    if (mihomoConfig_.dnsNameservers.empty())
+        mihomoConfig_.dnsNameservers = {"223.5.5.5", "8.8.8.8"};
+
+    const auto path = wxFileName(wxString::FromUTF8(dataPath_), "config.yaml")
+                          .GetFullPath().ToStdString();
+    std::string error;
+    if (!mihomoConfig_.Save(path, error))
+    {
+        std::cerr << "[WxClash] " << error << std::endl;
+        SetStatusText(wxString::FromUTF8(error), 2);
+        return;
+    }
+    SaveSettings(corePath_, dataPath_);
+    std::cerr << "[WxClash] Saved mihomo config: " << path << std::endl;
+    SetStatusText("Mihomo config saved", 2);
 }

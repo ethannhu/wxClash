@@ -30,6 +30,7 @@ executable(
   'WxClash',
   [
     'src/main.cpp',
+    'src/config/app_config.cpp',
     'src/api/mihomo_api_client.cpp',
     'src/core/mihomo_sidecar.cpp',
     'src/ui/main_frame.cpp',

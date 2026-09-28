@@ -10,10 +10,11 @@
 #include <wx/utils.h>
 
 #ifdef __unix__
-#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 #include <utility>
+#include <iostream>
 
 namespace
 {
@@ -29,37 +30,18 @@ namespace
     {
         return wxDir::Exists(path) || wxFileName::Mkdir(path, 0700, wxPATH_MKDIR_FULL);
     }
+
+    bool Fail(std::string& error, std::string message)
+    {
+        error = std::move(message);
+        std::cerr << "[WxClash] " << error << std::endl;
+        return false;
+    }
 }
 
 MihomoSidecar::~MihomoSidecar()
 {
     Stop();
-}
-
-std::string MihomoSidecar::FindCore() const
-{
-    const auto executable = wxStandardPaths::Get().GetExecutablePath();
-    const auto workingDirectory = wxGetCwd();
-    wxFileName projectResources(wxFileName(executable).GetPath());
-    projectResources.RemoveLastDir();
-    projectResources.AppendDir("resources");
-    const wxString candidates[] = {
-        wxFileName(workingDirectory, "resources").GetFullPath(),
-        wxFileName(wxFileName(executable).GetPath(), "resources").GetFullPath(),
-        projectResources.GetFullPath(),
-    };
-
-    for (const auto& directory : candidates)
-    {
-        wxDir dir(directory);
-        if (!dir.IsOpened())
-            continue;
-
-        wxString name;
-        if (dir.GetFirst(&name, "mihomo*", wxDIR_FILES))
-            return std::string((wxFileName(directory, name).GetFullPath()).utf8_str());
-    }
-    return {};
 }
 
 std::string MihomoSidecar::PrepareConfig(std::string& error) const
@@ -90,25 +72,20 @@ std::string MihomoSidecar::PrepareConfig(std::string& error) const
     return std::string(configPath.GetFullPath().utf8_str());
 }
 
-bool MihomoSidecar::Start(const MihomoApiClient& apiClient, std::string& error)
+bool MihomoSidecar::Start(const std::string& corePath,
+                          const MihomoApiClient& apiClient,
+                          std::string& error)
 {
     if (IsRunning())
         return true;
 
-    const auto core = FindCore();
-    if (core.empty())
-    {
-        error = "mihomo core was not found under resources";
-        return false;
-    }
+    const auto core = ToWx(corePath);
+    if (corePath.empty() || !wxFileName::FileExists(core))
+        return Fail(error, "mihomo core path is empty or does not exist");
 
 #ifdef __unix__
-    // The checked-in resource may not have the executable bit after checkout.
-    if (::chmod(core.c_str(), 0700) != 0)
-    {
-        error = "Unable to make mihomo executable";
-        return false;
-    }
+    if (::access(core.c_str(), X_OK) != 0)
+        return Fail(error, "mihomo core is not executable");
 #endif
 
     const auto config = PrepareConfig(error);
@@ -118,16 +95,13 @@ bool MihomoSidecar::Start(const MihomoApiClient& apiClient, std::string& error)
     const auto Quote = [](const wxString& value) {
         return wxString('"') + value + wxString('"');
     };
-    const wxString command = Quote(ToWx(core)) + " -d " +
+    const wxString command = Quote(core) + " -d " +
                              Quote(wxStandardPaths::Get().GetUserLocalDataDir()) +
                              " -f " + Quote(ToWx(config));
 
     pid_ = wxExecute(command, wxEXEC_ASYNC);
     if (pid_ <= 0)
-    {
-        error = "Unable to start mihomo sidecar";
-        return false;
-    }
+        return Fail(error, "Unable to start mihomo sidecar");
 
     MihomoApiClient probe = apiClient;
     probe.SetTimeoutMs(300);
@@ -141,6 +115,7 @@ bool MihomoSidecar::Start(const MihomoApiClient& apiClient, std::string& error)
     }
 
     error = "mihomo sidecar did not become ready";
+    std::cerr << "[WxClash] " << error << std::endl;
     Stop();
     return false;
 }

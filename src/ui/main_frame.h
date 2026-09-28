@@ -38,10 +38,13 @@ private:
     void OnNavigation(wxCommandEvent& event);
     void OnModeChanged(wxCommandEvent& event);
     void OnConnectApi(wxCommandEvent& event);
+    void OnBrowseCore(wxCommandEvent& event);
 
     wxSimplebook* book_ = nullptr;
     wxChoice* modeChoice_ = nullptr;
     wxTextCtrl* logText_ = nullptr;
+    wxTextCtrl* corePathText_ = nullptr;
+    std::string corePath_;
     MihomoApiClient apiClient_;
     MihomoSidecar mihomoSidecar_;
 

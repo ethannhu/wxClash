@@ -3,4 +3,4 @@ build/*
 builddir/*
 out/*
 .vs
-clash-verge-rev/
+tmp/*

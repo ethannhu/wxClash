@@ -3,6 +3,7 @@
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
+#include <wx/filedlg.h>
 #include <wx/dataview.h>
 #include <wx/listbox.h>
 #include <wx/notebook.h>
@@ -13,6 +14,8 @@
 #include <wx/statbox.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
+
+#include <iostream>
 
 namespace
 {
@@ -56,6 +59,7 @@ namespace
 
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_BUTTON(wxID_HIGHEST + 4, MainFrame::OnConnectApi)
+    EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
     EVT_BUTTON(wxID_ANY, MainFrame::OnNavigation)
         EVT_CHOICE(wxID_ANY, MainFrame::OnModeChanged)
             wxEND_EVENT_TABLE()
@@ -232,6 +236,16 @@ void MainFrame::BuildPages()
                                        wxDefaultPosition, wxDefaultSize,
                                        wxTE_PASSWORD),
                         1, wxEXPAND);
+    connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "Mihomo core"));
+    auto *corePathSizer = new wxBoxSizer(wxHORIZONTAL);
+    corePathText_ = new wxTextCtrl(connectionPage, wxID_ANY,
+                                    wxEmptyString, wxDefaultPosition,
+                                    wxDefaultSize, wxTE_PROCESS_ENTER);
+    corePathText_->SetHint("Path to mihomo executable");
+    corePathSizer->Add(corePathText_, 1, wxEXPAND | wxRIGHT, kSpacing);
+    corePathSizer->Add(new wxButton(connectionPage, wxID_HIGHEST + 5, "Browse..."),
+                       0, wxEXPAND);
+    connectionForm->Add(corePathSizer, 1, wxEXPAND);
     connectionForm->AddGrowableCol(1, 1);
     connectionPage->SetSizer(connectionForm);
     notebook->AddPage(connectionPage, "Connection");
@@ -247,6 +261,9 @@ void MainFrame::BuildPages()
     runtimePage->SetSizer(runtimeSizer);
     notebook->AddPage(runtimePage, "Runtime");
     settingsSizer->Add(notebook, 1, wxEXPAND);
+
+    if (!corePath_.empty())
+        corePathText_->SetValue(wxString::FromUTF8(corePath_));
 
     book_->SetSelection(PageOverview);
 }
@@ -268,9 +285,11 @@ void MainFrame::OnModeChanged(wxCommandEvent &event)
 
 void MainFrame::OnConnectApi(wxCommandEvent&)
 {
+    corePath_ = corePathText_ ? corePathText_->GetValue().ToStdString() : std::string{};
     std::string startError;
-    if (!mihomoSidecar_.Start(apiClient_, startError))
+    if (!mihomoSidecar_.Start(corePath_, apiClient_, startError))
     {
+        std::cerr << "[WxClash] Sidecar error: " << startError << std::endl;
         SetStatusText("Sidecar error: " + wxString::FromUTF8(startError), 2);
         return;
     }
@@ -278,8 +297,22 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
     const auto response = apiClient_.GetVersion();
     if (!response.ok)
     {
+        std::cerr << "[WxClash] API error: " << response.error << std::endl;
         SetStatusText("API error: " + wxString::FromUTF8(response.error), 2);
         return;
     }
     SetStatusText("API connected", 2);
+}
+
+void MainFrame::OnBrowseCore(wxCommandEvent&)
+{
+    wxFileDialog dialog(this, "Select mihomo core", wxEmptyString,
+                        wxEmptyString, "Executable files|*|All files|*.*",
+                        wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (dialog.ShowModal() == wxID_OK)
+    {
+        corePath_ = dialog.GetPath().ToStdString();
+        if (corePathText_)
+            corePathText_->SetValue(dialog.GetPath());
+    }
 }

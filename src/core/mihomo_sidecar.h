@@ -13,12 +13,13 @@ public:
     MihomoSidecar(const MihomoSidecar&) = delete;
     MihomoSidecar& operator=(const MihomoSidecar&) = delete;
 
-    bool Start(const MihomoApiClient& apiClient, std::string& error);
+    bool Start(const std::string& corePath,
+               const MihomoApiClient& apiClient,
+               std::string& error);
     void Stop();
     bool IsRunning() const { return pid_ > 0; }
 
 private:
-    std::string FindCore() const;
     std::string PrepareConfig(std::string& error) const;
 
     long pid_ = -1;

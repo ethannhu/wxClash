@@ -35,7 +35,8 @@ namespace
         return wxFileName(directory, "settings.conf").GetFullPath();
     }
 
-    void LoadSettings(std::string& corePath, std::string& dataPath)
+    void LoadSettings(std::string& corePath, std::string& dataPath,
+                      std::string& configPath)
     {
         wxFFile file(SettingsPath(), "r");
         if (!file.IsOpened())
@@ -53,10 +54,13 @@ namespace
                 corePath = line.Mid(10).ToStdString();
             else if (line.StartsWith("data_path="))
                 dataPath = line.Mid(10).ToStdString();
+            else if (line.StartsWith("config_path="))
+                configPath = line.Mid(12).ToStdString();
         }
     }
 
-    void SaveSettings(const std::string& corePath, const std::string& dataPath)
+    void SaveSettings(const std::string& corePath, const std::string& dataPath,
+                      const std::string& configPath)
     {
         wxFFile file(SettingsPath(), "w");
         if (!file.IsOpened())
@@ -68,6 +72,7 @@ namespace
 
         const wxString contents = "core_path=" + wxString::FromUTF8(corePath) +
                                   "\ndata_path=" + wxString::FromUTF8(dataPath) +
+                                  "\nconfig_path=" + wxString::FromUTF8(configPath) +
                                   "\n";
         if (!file.Write(contents) || !file.Close())
             std::cerr << "[WxClash] Unable to write settings file" << std::endl;
@@ -112,7 +117,7 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_TIMER(wxID_HIGHEST + 8, MainFrame::OnSidecarOutput)
     EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
     EVT_BUTTON(wxID_HIGHEST + 6, MainFrame::OnBrowseDataPath)
-    EVT_BUTTON(wxID_HIGHEST + 7, MainFrame::OnImportConfig)
+    EVT_BUTTON(wxID_HIGHEST + 7, MainFrame::OnBrowseConfig)
     EVT_BUTTON(wxID_HIGHEST + 9, MainFrame::OnSaveMihomoConfig)
     EVT_BUTTON(wxID_ANY, MainFrame::OnNavigation)
         EVT_CHOICE(wxID_ANY, MainFrame::OnModeChanged)
@@ -123,13 +128,14 @@ MainFrame::MainFrame()
               wxDEFAULT_FRAME_STYLE),
       sidecarOutputTimer_(this, wxID_HIGHEST + 8)
 {
-    LoadSettings(corePath_, dataPath_);
+    LoadSettings(corePath_, dataPath_, configPath_);
     if (dataPath_.empty())
         dataPath_ = MihomoSidecar::DefaultDataPath();
+    if (configPath_.empty())
+        configPath_ = wxFileName(wxString::FromUTF8(dataPath_), "config.yaml")
+                          .GetFullPath().ToStdString();
     std::string configError;
-    const auto configPath = wxFileName(wxString::FromUTF8(dataPath_), "config.yaml")
-                                .GetFullPath().ToStdString();
-    if (!mihomoConfig_.Load(configPath, configError))
+    if (!mihomoConfig_.Load(configPath_, configError))
         std::cerr << "[WxClash] " << configError << std::endl;
 
     apiClient_.SetDebugCallback([this](const std::string& message) {
@@ -163,7 +169,9 @@ MainFrame::MainFrame()
 MainFrame::~MainFrame()
 {
     sidecarOutputTimer_.Stop();
-    SaveSettings(corePath_, dataPath_);
+    if (configPathText_)
+        configPath_ = configPathText_->GetValue().ToStdString();
+    SaveSettings(corePath_, dataPath_, configPath_);
     mihomoSidecar_.Stop();
 }
 
@@ -328,9 +336,15 @@ void MainFrame::BuildPages()
                         0, wxEXPAND);
     connectionForm->Add(dataPathSizer, 1, wxEXPAND);
     connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "Mihomo config"));
-    auto *importConfigButton = new wxButton(connectionPage, wxID_HIGHEST + 7,
-                                            "Import config...");
-    connectionForm->Add(importConfigButton, 1, wxEXPAND);
+    auto *configPathSizer = new wxBoxSizer(wxHORIZONTAL);
+    configPathText_ = new wxTextCtrl(connectionPage, wxID_ANY,
+                                     wxEmptyString, wxDefaultPosition,
+                                     wxDefaultSize, wxTE_PROCESS_ENTER);
+    configPathText_->SetHint("Path to mihomo YAML config");
+    configPathSizer->Add(configPathText_, 1, wxEXPAND | wxRIGHT, kSpacing);
+    configPathSizer->Add(new wxButton(connectionPage, wxID_HIGHEST + 7, "Browse..."),
+                         0, wxEXPAND);
+    connectionForm->Add(configPathSizer, 1, wxEXPAND);
     connectionForm->AddGrowableCol(1, 1);
     connectionPage->SetSizer(connectionForm);
     notebook->AddPage(connectionPage, "Connection");
@@ -445,6 +459,8 @@ void MainFrame::BuildPages()
 
     if (!corePath_.empty())
         corePathText_->SetValue(wxString::FromUTF8(corePath_));
+    if (!configPath_.empty())
+        configPathText_->SetValue(wxString::FromUTF8(configPath_));
 
     book_->SetSelection(PageOverview);
 }
@@ -518,14 +534,22 @@ void MainFrame::OnBrowseDataPath(wxCommandEvent&)
     }
 }
 
-void MainFrame::OnImportConfig(wxCommandEvent&)
+void MainFrame::OnBrowseConfig(wxCommandEvent&)
 {
-    wxFileDialog dialog(this, "Import mihomo config", wxEmptyString,
-                        wxEmptyString,
+    const wxFileName currentPath(configPathText_ ? configPathText_->GetValue()
+                                                  : wxString{});
+    wxFileDialog dialog(this, "Select mihomo config",
+                        currentPath.GetPath(), currentPath.GetFullName(),
                         "YAML files (*.yaml;*.yml)|*.yaml;*.yml|All files|*.*",
                         wxFD_OPEN | wxFD_FILE_MUST_EXIST);
     if (dialog.ShowModal() != wxID_OK)
         return;
+
+    if (configPathText_)
+    {
+        configPathText_->SetValue(dialog.GetPath());
+        configPath_ = dialog.GetPath().ToStdString();
+    }
 
     dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : dataPath_;
     const wxString dataDirectory = wxString::FromUTF8(dataPath_);
@@ -599,7 +623,9 @@ void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
         SetStatusText(wxString::FromUTF8(error), 2);
         return;
     }
-    SaveSettings(corePath_, dataPath_);
+    if (configPathText_)
+        configPath_ = configPathText_->GetValue().ToStdString();
+    SaveSettings(corePath_, dataPath_, configPath_);
     std::cerr << "[WxClash] Saved mihomo config: " << path << std::endl;
     SetStatusText("Mihomo config saved", 2);
 }

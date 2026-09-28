@@ -44,7 +44,7 @@ private:
     void OnSidecarOutput(wxTimerEvent& event);
     void OnBrowseCore(wxCommandEvent& event);
     void OnBrowseDataPath(wxCommandEvent& event);
-    void OnImportConfig(wxCommandEvent& event);
+    void OnBrowseConfig(wxCommandEvent& event);
     void OnSaveMihomoConfig(wxCommandEvent& event);
 
     wxSimplebook* book_ = nullptr;
@@ -52,6 +52,7 @@ private:
     wxTextCtrl* logText_ = nullptr;
     wxTextCtrl* corePathText_ = nullptr;
     wxTextCtrl* dataPathText_ = nullptr;
+    wxTextCtrl* configPathText_ = nullptr;
     wxChoice* mihomoModeChoice_ = nullptr;
     wxChoice* mihomoLogLevelChoice_ = nullptr;
     wxChoice* tunStackChoice_ = nullptr;
@@ -68,6 +69,7 @@ private:
     wxCheckBox* dnsEnableCheck_ = nullptr;
     std::string corePath_;
     std::string dataPath_;
+    std::string configPath_;
     MihomoConfig mihomoConfig_;
     MihomoApiClient apiClient_;
     MihomoSidecar mihomoSidecar_;

@@ -1,6 +1,5 @@
 #include "mihomo_api_client.h"
 
-#include <wx/log.h>
 #include <wx/socket.h>
 
 #include <cstdint>
@@ -117,11 +116,8 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
             break;
     }
 
-    // Keep the request secret out of logs, but print the complete response.
-    wxLogDebug(wxString::Format("Mihomo API raw response (%s %s):\n%s",
-                                wxString::FromUTF8(method),
-                                wxString::FromUTF8(path),
-                                wxString::FromUTF8(raw)));
+    // Keep the request secret out of logs. The complete response is sent to
+    // the application's Logs page through the debug callback below.
     if (debugCallback_)
         debugCallback_("Mihomo API raw response (" + method + " " + path + "):\n" + raw);
 

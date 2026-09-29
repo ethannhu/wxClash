@@ -19,7 +19,7 @@
 
 namespace
 {
-    constexpr int kReadyAttempts = 30;
+    constexpr int kReadyAttempts = 100;
     constexpr unsigned kReadyIntervalMs = 100;
 
     wxString ToWx(const std::string& value)

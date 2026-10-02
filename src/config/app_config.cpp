@@ -5,6 +5,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <fstream>
+#include <cctype>
 #include <stdexcept>
 #include <utility>
 
@@ -18,6 +19,73 @@ namespace
             target = value.as<T>();
     }
 
+}
+
+bool ValidateExternalController(const std::string& value, std::string& error)
+{
+    const std::string& address = value;
+
+    if (address.empty() || address.find('/') != std::string::npos ||
+        address.find_first_of(" \t\r\n") != std::string::npos)
+    {
+        error = "External controller must be host:port";
+        return false;
+    }
+
+    std::size_t portSeparator = std::string::npos;
+    if (address.front() == '[')
+    {
+        const auto closingBracket = address.find(']');
+        if (closingBracket == std::string::npos ||
+            closingBracket + 1 >= address.size() ||
+            address[closingBracket + 1] != ':')
+        {
+            error = "External controller IPv6 address must be [host]:port";
+            return false;
+        }
+        portSeparator = closingBracket + 1;
+    }
+    else
+    {
+        portSeparator = address.rfind(':');
+        if (portSeparator == std::string::npos ||
+            address.find(':') != portSeparator)
+        {
+            error = "External controller must be host:port";
+            return false;
+        }
+    }
+
+    const auto host = address.substr(0, portSeparator);
+    const auto port = address.substr(portSeparator + 1);
+    if (host.empty() || port.empty())
+    {
+        error = "External controller must include both host and port";
+        return false;
+    }
+    for (const auto character : port)
+    {
+        if (!std::isdigit(static_cast<unsigned char>(character)))
+        {
+            error = "External controller port must be numeric";
+            return false;
+        }
+    }
+    try
+    {
+        const auto portNumber = std::stoul(port);
+        if (portNumber == 0 || portNumber > 65535)
+        {
+            error = "External controller port must be between 1 and 65535";
+            return false;
+        }
+    }
+    catch (...)
+    {
+        error = "External controller port is invalid";
+        return false;
+    }
+    return true;
 }
 
 bool MihomoConfig::Load(const std::string& path, std::string& error)
@@ -46,6 +114,9 @@ bool MihomoConfig::Load(const std::string& path, std::string& error)
         ReadScalar(root, "log-level", parsed.logLevel);
         ReadScalar(root, "external-controller", parsed.externalController);
         ReadScalar(root, "secret", parsed.secret);
+
+        if (!ValidateExternalController(parsed.externalController, error))
+            return false;
 
         const auto tun = root["tun"];
         if (tun)
@@ -99,6 +170,9 @@ bool MihomoConfig::Load(const std::string& path, std::string& error)
 
 bool MihomoConfig::Save(const std::string& path, std::string& error) const
 {
+    if (!ValidateExternalController(externalController, error))
+        return false;
+
     const wxFileName filename(wxString::FromUTF8(path));
     if (!wxFileName::Mkdir(filename.GetPath(), 0700, wxPATH_MKDIR_FULL) &&
         !wxDirExists(filename.GetPath()))

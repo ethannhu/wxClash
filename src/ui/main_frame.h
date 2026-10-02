@@ -4,6 +4,7 @@
 #include <wx/timer.h>
 
 #include <cstdint>
+#include <cstddef>
 
 #include "../api/mihomo_api_client.h"
 #include "../config/app_config.h"
@@ -53,6 +54,10 @@ private:
     void OnSaveMihomoConfig(wxCommandEvent& event);
     void UpdateMihomoControls();
     void RefreshCoreData();
+    void RefreshProxies();
+    void RefreshRules();
+    void AppendLog(const wxString& message);
+    void ApplyPollingSettings();
 
     wxSimplebook* book_ = nullptr;
     wxChoice* modeChoice_ = nullptr;
@@ -79,6 +84,8 @@ private:
     wxTextCtrl* controllerText_ = nullptr;
     wxTextCtrl* secretText_ = nullptr;
     wxTextCtrl* nameserverText_ = nullptr;
+    wxChoice* pollingIntervalChoice_ = nullptr;
+    wxChoice* logLengthChoice_ = nullptr;
     wxCheckBox* allowLanCheck_ = nullptr;
     wxCheckBox* ipv6Check_ = nullptr;
     wxCheckBox* tunEnableCheck_ = nullptr;
@@ -94,6 +101,9 @@ private:
     std::uint64_t lastDownloadTotal_ = 0;
     std::uint64_t lastUploadTotal_ = 0;
     bool hasTrafficSample_ = false;
+    bool apiConnected_ = false;
+    int pollingIntervalMs_ = 2000;
+    std::size_t maxLogLength_ = 100000;
 
     wxDECLARE_EVENT_TABLE();
 };

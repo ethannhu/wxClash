@@ -14,7 +14,7 @@ struct MihomoConfig
     bool allowLan = false;
     bool ipv6 = true;
     std::string logLevel = "info";
-    std::string externalController = "127.0.0.1:9097";
+    std::string externalController = "127.0.0.1:9090";
     std::string secret;
 
     bool tunEnable = false;
@@ -32,3 +32,5 @@ private:
     // rules and proxy-groups) when an imported configuration is saved.
     YAML::Node sourceConfig_;
 };
+
+bool ValidateExternalController(const std::string& value, std::string& error);

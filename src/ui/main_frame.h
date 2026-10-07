@@ -47,6 +47,7 @@ private:
     void OnModeChanged(wxCommandEvent& event);
     void OnConnectApi(wxCommandEvent& event);
     void OnDisconnectApi(wxCommandEvent& event);
+    void OnClose(wxCloseEvent& event);
     void OnSidecarOutput(wxTimerEvent& event);
     void OnMonitorTimer(wxTimerEvent& event);
     void OnBrowseCore(wxCommandEvent& event);
@@ -98,6 +99,7 @@ private:
     wxTimer sidecarOutputTimer_;
     wxTimer monitorTimer_;
     bool apiConnected_ = false;
+    bool closing_ = false;
     int pollingIntervalMs_ = 2000;
     std::size_t maxLogLength_ = 100000;
 

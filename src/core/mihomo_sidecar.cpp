@@ -43,14 +43,9 @@ namespace
 class MihomoSidecarProcess final : public wxProcess
 {
 public:
-    explicit MihomoSidecarProcess(MihomoSidecar* owner)
-        : owner_(owner)
+    MihomoSidecarProcess(MihomoSidecar* owner, wxEvtHandler* parent)
+        : wxProcess(parent), owner_(owner)
     {
-    }
-
-    void DetachOwner()
-    {
-        owner_ = nullptr;
     }
 
     void OnTerminate(int pid, int status) override
@@ -74,19 +69,22 @@ std::string MihomoSidecar::DefaultDataPath()
     return std::string(path.utf8_str());
 }
 
-MihomoSidecar::~MihomoSidecar()
-{
-    Stop();
-}
+MihomoSidecar::~MihomoSidecar() = default;
 
 bool MihomoSidecar::Start(const std::string& corePath,
                           const std::string& dataPath,
                           const std::string& configPath,
                           const MihomoApiClient& apiClient,
+                          wxEvtHandler* processParent,
                           std::string& error)
 {
     if (IsRunning())
         return true;
+    if (stopping_)
+    {
+        error = "mihomo sidecar is still stopping";
+        return false;
+    }
 
     const auto core = ToWx(corePath);
     if (corePath.empty() || !wxFileName::FileExists(core))
@@ -111,7 +109,7 @@ bool MihomoSidecar::Start(const std::string& corePath,
                              Quote(ToWx(dataPath)) +
                              " -f " + Quote(ToWx(configPath));
 
-    process_ = new MihomoSidecarProcess(this);
+    process_ = new MihomoSidecarProcess(this, processParent);
     process_->Redirect();
     pid_ = wxExecute(command, wxEXEC_ASYNC, process_);
     if (pid_ <= 0)
@@ -134,27 +132,32 @@ bool MihomoSidecar::Start(const std::string& corePath,
 
     error = "mihomo sidecar did not become ready";
     std::cerr << "[WxClash] " << error << std::endl;
-    Stop();
+    StopAsync({});
     return false;
 }
 
-void MihomoSidecar::Stop()
+void MihomoSidecar::StopAsync(std::function<void()> onStopped)
 {
     if (pid_ <= 0)
+    {
+        if (onStopped)
+            onStopped();
+        return;
+    }
+
+    if (onStopped)
+        stopCallbacks_.push_back(std::move(onStopped));
+    if (stopping_)
         return;
 
+    stopping_ = true;
     PollOutput();
-    const auto pid = pid_;
-    auto* process = process_;
-    if (process)
-        process->DetachOwner();
-    process_ = nullptr;
-    pid_ = -1;
 
+    const auto pid = pid_;
     wxKill(pid, wxSIGTERM);
     wxMilliSleep(100);
-    wxKill(pid, wxSIGKILL);
-    FlushPendingOutput();
+    if (wxProcess::Exists(pid))
+        wxKill(pid, wxSIGKILL);
 }
 
 void MihomoSidecar::OnProcessTerminated(long pid, int)
@@ -166,6 +169,12 @@ void MihomoSidecar::OnProcessTerminated(long pid, int)
     FlushPendingOutput();
     process_ = nullptr;
     pid_ = -1;
+    auto callbacks = std::move(stopCallbacks_);
+    stopCallbacks_.clear();
+    stopping_ = false;
+    for (auto& callback : callbacks)
+        if (callback)
+            callback();
 }
 
 void MihomoSidecar::DrainStream(wxInputStream* stream, std::string& pending,

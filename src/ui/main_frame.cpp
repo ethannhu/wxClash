@@ -184,6 +184,7 @@ namespace
 }
 
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
+    EVT_CLOSE(MainFrame::OnClose)
     EVT_BUTTON(wxID_HIGHEST + 4, MainFrame::OnConnectApi)
     EVT_BUTTON(wxID_HIGHEST + 11, MainFrame::OnDisconnectApi)
     EVT_TIMER(wxID_HIGHEST + 8, MainFrame::OnSidecarOutput)
@@ -245,7 +246,6 @@ MainFrame::~MainFrame()
     if (configPathText_)
         configPath_ = configPathText_->GetValue().ToStdString();
     SaveSettings(corePath_, dataPath_, configPath_, pollingIntervalMs_, maxLogLength_);
-    mihomoSidecar_.Stop();
 }
 
 void MainFrame::BuildNavigation(wxSizer *parentSizer)
@@ -809,7 +809,7 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
 
     std::string startError;
     if (!mihomoSidecar_.Start(corePath_, dataPath_, configPath_,
-                              apiClient_, startError))
+                              apiClient_, this, startError))
     {
         std::cerr << "[WxClash] Sidecar error: " << startError << std::endl;
         apiConnected_ = false;
@@ -848,8 +848,38 @@ void MainFrame::OnDisconnectApi(wxCommandEvent&)
     monitorTimer_.Stop();
     sidecarOutputTimer_.Stop();
     apiConnected_ = false;
-    mihomoSidecar_.Stop();
-    SetStatusText("Not connected", 2);
+    if (!mihomoSidecar_.IsRunning())
+    {
+        SetStatusText("Not connected", 2);
+        return;
+    }
+
+    SetStatusText("Disconnecting...", 2);
+    mihomoSidecar_.StopAsync([this] {
+        SetStatusText("Not connected", 2);
+    });
+}
+
+void MainFrame::OnClose(wxCloseEvent& event)
+{
+    event.Veto();
+    if (closing_)
+        return;
+
+    closing_ = true;
+    sidecarOutputTimer_.Stop();
+    monitorTimer_.Stop();
+    apiConnected_ = false;
+
+    if (!mihomoSidecar_.IsRunning())
+    {
+        Destroy();
+        return;
+    }
+
+    mihomoSidecar_.StopAsync([this] {
+        Destroy();
+    });
 }
 
 void MainFrame::OnBrowseCore(wxCommandEvent&)

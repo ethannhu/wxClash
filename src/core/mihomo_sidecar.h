@@ -1,14 +1,15 @@
 #pragma once
 
 #include <functional>
-#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <wx/process.h>
 
 class MihomoApiClient;
 class wxInputStream;
+class wxEvtHandler;
 class MihomoSidecarProcess;
 
 class MihomoSidecar final
@@ -26,8 +27,9 @@ public:
                const std::string& dataPath,
                const std::string& configPath,
                const MihomoApiClient& apiClient,
+               wxEvtHandler* processParent,
                std::string& error);
-    void Stop();
+    void StopAsync(std::function<void()> onStopped);
     void PollOutput();
     void SetOutputCallback(std::function<void(const std::string&)> callback)
     {
@@ -48,4 +50,6 @@ private:
     std::function<void(const std::string&)> outputCallback_;
     std::string stdoutPending_;
     std::string stderrPending_;
+    bool stopping_ = false;
+    std::vector<std::function<void()>> stopCallbacks_;
 };

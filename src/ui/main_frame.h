@@ -3,8 +3,13 @@
 #include <wx/frame.h>
 #include <wx/timer.h>
 
+#include <nlohmann/json.hpp>
+
 #include <cstdint>
 #include <cstddef>
+#include <map>
+#include <string>
+#include <vector>
 
 #include "../api/mihomo_api_client.h"
 #include "../config/app_config.h"
@@ -13,6 +18,7 @@
 class wxCheckBox;
 class wxChoice;
 class wxDataViewListCtrl;
+class wxDataViewEvent;
 class wxListBox;
 class wxSimplebook;
 class wxSizer;
@@ -50,6 +56,8 @@ private:
     void OnClose(wxCloseEvent& event);
     void OnSidecarOutput(wxTimerEvent& event);
     void OnMonitorTimer(wxTimerEvent& event);
+    void OnProxyGroupSelected(wxCommandEvent& event);
+    void OnProxySelected(wxDataViewEvent& event);
     void OnBrowseCore(wxCommandEvent& event);
     void OnBrowseDataPath(wxCommandEvent& event);
     void OnBrowseConfig(wxCommandEvent& event);
@@ -57,16 +65,14 @@ private:
     void UpdateMihomoControls();
     void RefreshCoreData();
     void RefreshProxies();
+    void PopulateProxyTable();
+    void SelectProxy();
     void RefreshRules();
     void AppendLog(const wxString& message);
     void ApplyPollingSettings();
 
     wxSimplebook* book_ = nullptr;
     wxTextCtrl* logText_ = nullptr;
-    wxStaticText* activeConnectionsMetric_ = nullptr;
-    wxStaticText* memoryMetric_ = nullptr;
-    wxStaticText* downloadMetric_ = nullptr;
-    wxStaticText* uploadMetric_ = nullptr;
     wxDataViewListCtrl* proxyTable_ = nullptr;
     wxListBox* proxyGroups_ = nullptr;
     wxDataViewListCtrl* connectionTable_ = nullptr;
@@ -102,6 +108,10 @@ private:
     bool closing_ = false;
     int pollingIntervalMs_ = 2000;
     std::size_t maxLogLength_ = 100000;
+    std::map<std::string, std::vector<std::string>> proxyGroupMembers_;
+    std::map<std::string, std::string> proxyCurrentSelection_;
+    nlohmann::json proxyData_;
+    std::string selectedProxyGroup_;
 
     wxDECLARE_EVENT_TABLE();
 };

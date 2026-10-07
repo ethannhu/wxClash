@@ -1,16 +1,21 @@
 #include "mihomo_api_client.h"
 
+#include <nlohmann/json.hpp>
+
 #include <wx/socket.h>
 
 #include <cstdint>
 #include <cctype>
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <optional>
 #include <utility>
 
 namespace
 {
+    constexpr int kStreamingSnapshotTimeoutMs = 2500;
+
     std::optional<std::string> HeaderValue(const std::string& raw,
                                            const char* headerName)
     {
@@ -61,7 +66,8 @@ namespace
         }
     }
 
-    std::optional<std::string> FirstChunkedBody(const std::string& raw)
+    std::optional<std::string> DecodeChunkedBody(const std::string& raw,
+                                                 bool firstChunkOnly)
     {
         const auto headerEnd = raw.find("\r\n\r\n");
         if (headerEnd == std::string::npos)
@@ -78,29 +84,51 @@ namespace
         if (encoding.find("chunked") == std::string::npos)
             return std::nullopt;
 
-        const auto sizeStart = headerEnd + 4;
-        const auto sizeEnd = raw.find("\r\n", sizeStart);
-        if (sizeEnd == std::string::npos)
-            return std::nullopt;
-        const auto extension = raw.find(';', sizeStart);
-        const auto sizeTextEnd = extension != std::string::npos && extension < sizeEnd
-                                     ? extension
-                                     : sizeEnd;
-        try
+        std::string body;
+        std::size_t offset = headerEnd + 4;
+        while (true)
         {
-            const auto chunkSize = std::stoull(
-                raw.substr(sizeStart, sizeTextEnd - sizeStart), nullptr, 16);
+            const auto sizeEnd = raw.find("\r\n", offset);
+            if (sizeEnd == std::string::npos)
+                return std::nullopt;
+            const auto extension = raw.find(';', offset);
+            const auto sizeTextEnd = extension != std::string::npos && extension < sizeEnd
+                                         ? extension
+                                         : sizeEnd;
+
+            std::size_t chunkSize = 0;
+            try
+            {
+                chunkSize = std::stoull(
+                    raw.substr(offset, sizeTextEnd - offset), nullptr, 16);
+            }
+            catch (...)
+            {
+                return std::nullopt;
+            }
+
             const auto chunkStart = sizeEnd + 2;
             if (raw.size() < chunkStart + chunkSize + 2)
                 return std::nullopt;
             if (raw.compare(chunkStart + chunkSize, 2, "\r\n") != 0)
                 return std::nullopt;
-            return raw.substr(chunkStart, chunkSize);
+
+            if (chunkSize == 0)
+                return body;
+
+            body.append(raw, chunkStart, chunkSize);
+            if (firstChunkOnly)
+                return body;
+            offset = chunkStart + chunkSize + 2;
         }
-        catch (...)
-        {
-            return std::nullopt;
-        }
+    }
+
+    bool IsStreamingSnapshot(const std::string& method, const std::string& path)
+    {
+        if (method != "GET")
+            return false;
+        return path == "/traffic" || path == "/memory" ||
+               path == "/connections";
     }
 
     bool ParseUrl(const std::string& url, std::string& host, int& port)
@@ -129,6 +157,28 @@ namespace
         }
         return !host.empty() && port > 0 && port < 65536;
     }
+
+    std::string UrlEncode(const std::string& value)
+    {
+        static constexpr char hex[] = "0123456789ABCDEF";
+        std::string encoded;
+        for (const unsigned char character : value)
+        {
+            if ((character >= 'a' && character <= 'z') ||
+                (character >= 'A' && character <= 'Z') ||
+                (character >= '0' && character <= '9') ||
+                character == '-' || character == '_' || character == '.' ||
+                character == '~')
+                encoded.push_back(static_cast<char>(character));
+            else
+            {
+                encoded.push_back('%');
+                encoded.push_back(hex[character >> 4]);
+                encoded.push_back(hex[character & 0x0F]);
+            }
+        }
+        return encoded;
+    }
 }
 
 MihomoApiClient::MihomoApiClient(MihomoApiConfig config)
@@ -153,7 +203,11 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
     address.Hostname(host);
     address.Service(port);
     wxSocketClient socket;
-    socket.SetTimeout(static_cast<unsigned>(config_.timeoutMs / 1000));
+    const bool streamingSnapshot = IsStreamingSnapshot(method, path);
+    const int timeoutMs = streamingSnapshot
+                              ? std::max(config_.timeoutMs, kStreamingSnapshotTimeoutMs)
+                              : config_.timeoutMs;
+    socket.SetTimeout(static_cast<unsigned>(std::max(1, (timeoutMs + 999) / 1000)));
     if (!socket.Connect(address, true))
     {
         response.error = "Unable to connect to Mihomo Controller";
@@ -167,18 +221,32 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
                                 "Connection: close\r\n" +
                                 "Content-Length: " + std::to_string(body.size()) +
                                 "\r\n\r\n" + body;
-    socket.Write(request.data(), request.size());
-    if (socket.Error())
+    std::size_t written = 0;
+    while (written < request.size())
     {
-        response.error = "Unable to send Controller request";
-        return response;
+        if (!socket.WaitForWrite(0, 100))
+        {
+            response.error = "Timed out sending Controller request";
+            return response;
+        }
+        const auto remaining = request.size() - written;
+        const auto writeSize = static_cast<wxUint32>(std::min<std::size_t>(
+            remaining, std::numeric_limits<wxUint32>::max()));
+        socket.Write(request.data() + written, writeSize);
+        const auto count = socket.LastWriteCount();
+        if (socket.Error() || count == 0)
+        {
+            response.error = "Unable to send Controller request";
+            return response;
+        }
+        written += count;
     }
 
     std::string raw;
     char buffer[4096];
     std::optional<std::string> chunkedBody;
     const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(config_.timeoutMs);
+                          std::chrono::milliseconds(timeoutMs);
     while (std::chrono::steady_clock::now() < deadline)
     {
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -187,7 +255,12 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
         if (waitMs <= 0 || !socket.WaitForRead(0, waitMs))
             continue;
         socket.Read(buffer, sizeof(buffer));
-        const auto count = socket.LastCount();
+        if (socket.Error())
+        {
+            response.error = "Unable to read Controller response";
+            return response;
+        }
+        const auto count = socket.LastReadCount();
         if (count == 0)
             break;
         raw.append(buffer, count);
@@ -195,7 +268,7 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
         const auto headerEnd = raw.find("\r\n\r\n");
         if (headerEnd != std::string::npos)
         {
-            chunkedBody = FirstChunkedBody(raw);
+            chunkedBody = DecodeChunkedBody(raw, streamingSnapshot);
             if (chunkedBody)
                 break;
         }
@@ -205,15 +278,15 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
             break;
     }
 
-    // Keep the request secret out of logs. The complete response is sent to
-    // the application's Logs page through the debug callback below.
-    if (debugCallback_)
-        debugCallback_("Mihomo API raw response (" + method + " " + path + "):\n" + raw);
-
     const auto headerEnd = raw.find("\r\n\r\n");
     if (headerEnd == std::string::npos)
     {
-        response.error = "Invalid Controller response";
+        const bool timedOut = std::chrono::steady_clock::now() >= deadline;
+        response.error = raw.empty()
+                             ? (timedOut
+                                    ? "Controller did not respond before timeout"
+                                    : "Controller closed connection without a response")
+                             : "Controller response did not contain an HTTP header";
         return response;
     }
     const auto firstLineEnd = raw.find("\r\n");
@@ -251,4 +324,11 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
     if (!response.ok)
         response.error = "Controller returned HTTP " + std::to_string(response.status);
     return response;
+}
+
+MihomoApiResponse MihomoApiClient::SelectProxy(const std::string& group,
+                                               const std::string& proxy) const
+{
+    return Request("PUT", "/proxies/" + UrlEncode(group),
+                   nlohmann::json{{"name", proxy}}.dump());
 }

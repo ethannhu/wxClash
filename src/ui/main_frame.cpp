@@ -149,21 +149,6 @@ namespace
             std::cerr << "[WxClash] Unable to write settings file" << std::endl;
     }
 
-    wxStaticText *AddMetric(wxWindow *parent, wxSizer *sizer,
-                            const wxString &title, const wxString &value)
-    {
-        auto *panel = new wxPanel(parent);
-        auto *panelSizer = new wxBoxSizer(wxVERTICAL);
-        panelSizer->Add(new wxStaticText(panel, wxID_ANY, title), 0,
-                        wxBOTTOM, 4);
-        auto *valueText = new wxStaticText(panel, wxID_ANY, value);
-        valueText->SetFont(valueText->GetFont().Bold().Scale(1.25));
-        panelSizer->Add(valueText, 0);
-        panel->SetSizer(panelSizer);
-        sizer->Add(panel, 1, wxEXPAND | wxRIGHT, kSpacing);
-        return valueText;
-    }
-
     wxPanel *AddPage(wxSimplebook *book, const wxString &title)
     {
         auto *page = new wxPanel(book);
@@ -189,6 +174,8 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_BUTTON(wxID_HIGHEST + 11, MainFrame::OnDisconnectApi)
     EVT_TIMER(wxID_HIGHEST + 8, MainFrame::OnSidecarOutput)
     EVT_TIMER(wxID_HIGHEST + 10, MainFrame::OnMonitorTimer)
+    EVT_LISTBOX(wxID_ANY, MainFrame::OnProxyGroupSelected)
+    EVT_DATAVIEW_SELECTION_CHANGED(wxID_ANY, MainFrame::OnProxySelected)
     EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
     EVT_BUTTON(wxID_HIGHEST + 6, MainFrame::OnBrowseDataPath)
     EVT_BUTTON(wxID_HIGHEST + 7, MainFrame::OnBrowseConfig)
@@ -213,9 +200,6 @@ MainFrame::MainFrame()
     if (!mihomoConfig_.Load(configPath_, configError))
         std::cerr << "[WxClash] " << configError << std::endl;
 
-    apiClient_.SetDebugCallback([this](const std::string& message) {
-        AppendLog(wxString::FromUTF8(message) + "\n\n");
-    });
     mihomoSidecar_.SetOutputCallback([this](const std::string& message) {
         AppendLog(wxString::FromUTF8(message) + "\n");
     });
@@ -225,7 +209,11 @@ MainFrame::MainFrame()
         if (closing_)
             Destroy();
         else
-            SetStatusText("Not connected", 2);
+        {
+            SetStatusText("Not connected", 0);
+            SetStatusText("", 1);
+            SetStatusText("", 2);
+        }
     });
     mihomoSidecar_.SetStartCallback([this] {
         sidecarOutputTimer_.Start(pollingIntervalMs_);
@@ -244,7 +232,7 @@ MainFrame::MainFrame()
     CreateStatusBar(3);
     int statusWidths[] = {-2, -2, -1};
     SetStatusWidths(3, statusWidths);
-    SetStatusText("API 127.0.0.1:9090", 0);
+    SetStatusText("Not connected", 0);
     SetStatusText("", 1);
     SetStatusText("Not connected", 2);
     SetSizer(rootSizer);
@@ -286,13 +274,6 @@ void MainFrame::BuildPages()
 {
     auto *overview = AddPage(book_, "Overview");
     auto *overviewSizer = overview->GetSizer();
-
-    auto *metrics = new wxBoxSizer(wxHORIZONTAL);
-    activeConnectionsMetric_ = AddMetric(overview, metrics, "Active connections", "0");
-    memoryMetric_ = AddMetric(overview, metrics, "Mihomo memory", "0 MB");
-    downloadMetric_ = AddMetric(overview, metrics, "Download", "0 B/s");
-    uploadMetric_ = AddMetric(overview, metrics, "Upload", "0 B/s");
-    overviewSizer->Add(metrics, 0, wxEXPAND | wxBOTTOM, kSpacing * 2);
 
     auto *shortcuts = new wxBoxSizer(wxHORIZONTAL);
     shortcuts->Add(new wxButton(overview, wxID_HIGHEST + 4, "Connect API"), 0,
@@ -578,9 +559,8 @@ void MainFrame::RefreshCoreData()
     const auto connectionsResponse = apiClient_.GetConnections();
     if (!connectionsResponse.ok)
     {
-        SetStatusText("Monitor error: " +
-                          wxString::FromUTF8(connectionsResponse.error),
-                      2);
+        AppendLog("[error] Monitor error (/connections): " +
+                  wxString::FromUTF8(connectionsResponse.error) + "\n");
         return;
     }
 
@@ -591,21 +571,22 @@ void MainFrame::RefreshCoreData()
     }
     catch (const Json::parse_error& exception)
     {
-        SetStatusText("Invalid /connections JSON: " + wxString::FromUTF8(exception.what()), 2);
+        AppendLog("[error] Invalid /connections JSON: " +
+                  wxString::FromUTF8(exception.what()) + "\n");
         return;
     }
     if (!connectionsRoot.is_object())
     {
-        SetStatusText("Invalid /connections JSON: expected an object", 2);
+        AppendLog("[error] Invalid /connections JSON: expected an object\n");
         return;
     }
     {
         const auto connections = connectionsRoot.find("connections");
-        if (activeConnectionsMetric_)
-            activeConnectionsMetric_->SetLabel(
-                std::to_string(connections != connectionsRoot.end() && connections->is_array()
-                                   ? connections->size()
-                                   : 0));
+        const auto connectionCount = connections != connectionsRoot.end() &&
+                                              connections->is_array()
+                                          ? connections->size()
+                                          : 0;
+        SetStatusText(wxString::Format("Connections: %zu", connectionCount), 1);
 
         if (connectionTable_)
         {
@@ -646,35 +627,33 @@ void MainFrame::RefreshCoreData()
         }
     }
 
-    const auto memoryResponse = apiClient_.GetMemory();
-    if (memoryResponse.ok)
-    {
-        try
-        {
-            const auto memory = Json::parse(memoryResponse.body);
-            if (memoryMetric_)
-                memoryMetric_->SetLabel(FormatBytes(JsonUint64(&memory, "inuse")));
-        }
-        catch (const Json::parse_error& exception)
-        {
-            SetStatusText("Invalid /memory JSON: " + wxString::FromUTF8(exception.what()), 2);
-        }
-    }
-
     const auto trafficResponse = apiClient_.GetTraffic();
-    if (trafficResponse.ok)
+    if (!trafficResponse.ok)
+    {
+        AppendLog("[error] Monitor error (/traffic): " +
+                  wxString::FromUTF8(trafficResponse.error) + "\n");
+    }
+    else
     {
         try
         {
             const auto traffic = Json::parse(trafficResponse.body);
-            if (downloadMetric_)
-                downloadMetric_->SetLabel(FormatBytes(JsonUint64(&traffic, "down")) + "/s");
-            if (uploadMetric_)
-                uploadMetric_->SetLabel(FormatBytes(JsonUint64(&traffic, "up")) + "/s");
+            if (!traffic.is_object())
+            {
+                AppendLog("[error] Invalid /traffic JSON: expected an object\n");
+                return;
+            }
+            SetStatusText("Download: " +
+                              wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "down"))) +
+                              "/s  Upload: " +
+                              wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "up"))) +
+                              "/s",
+                          2);
         }
         catch (const Json::parse_error& exception)
         {
-            SetStatusText("Invalid /traffic JSON: " + wxString::FromUTF8(exception.what()), 2);
+            AppendLog("[error] Invalid /traffic JSON: " +
+                      wxString::FromUTF8(exception.what()) + "\n");
         }
     }
 
@@ -686,7 +665,11 @@ void MainFrame::RefreshProxies()
         return;
     const auto response = apiClient_.GetProxies();
     if (!response.ok)
+    {
+        AppendLog("[error] Monitor error (/proxies): " +
+                  wxString::FromUTF8(response.error) + "\n");
         return;
+    }
     Json root;
     try
     {
@@ -694,63 +677,141 @@ void MainFrame::RefreshProxies()
     }
     catch (const Json::parse_error& exception)
     {
-        SetStatusText("Invalid /proxies JSON: " + wxString::FromUTF8(exception.what()), 2);
+        AppendLog("[error] Invalid /proxies JSON: " +
+                  wxString::FromUTF8(exception.what()) + "\n");
         return;
     }
     if (!root.is_object())
     {
-        SetStatusText("Invalid /proxies JSON: expected an object", 2);
+        AppendLog("[error] Invalid /proxies JSON: expected an object\n");
         return;
     }
+    proxyData_ = root;
+    proxyGroupMembers_.clear();
+    proxyCurrentSelection_.clear();
+    const auto proxies = root.find("proxies");
+    if (proxyGroups_)
+        proxyGroups_->Clear();
+    if (proxies != root.end() && proxies->is_object())
     {
-        const auto proxies = root.find("proxies");
-        if (proxyGroups_)
-            proxyGroups_->Clear();
-        if (proxyTable_)
-            proxyTable_->DeleteAllItems();
-        if (proxies != root.end() && proxies->is_object())
+        for (const auto& entry : proxies->items())
         {
-            for (const auto& entry : proxies->items())
+            const auto& name = entry.key();
+            const auto& proxy = entry.value();
+            const auto type = JsonString(&proxy, "type");
+            const auto isGroup = type == "Selector" || type == "URLTest" ||
+                                 type == "Fallback" || type == "LoadBalance" ||
+                                 type == "Relay";
+            if (!isGroup)
+                continue;
+            const auto all = proxy.find("all");
+            if (all != proxy.end() && all->is_array())
+                for (const auto& member : *all)
+                    if (member.is_string())
+                        proxyGroupMembers_[name].push_back(member.get<std::string>());
+            proxyCurrentSelection_[name] = JsonString(&proxy, "now");
+            if (proxyGroups_)
+                proxyGroups_->Append(wxString::FromUTF8(name));
+        }
+    }
+    if (proxyGroups_ && proxyGroups_->GetCount() > 0)
+    {
+        int selection = proxyGroups_->FindString(wxString::FromUTF8(selectedProxyGroup_));
+        if (selection == wxNOT_FOUND)
+            selection = 0;
+        proxyGroups_->SetSelection(selection);
+        selectedProxyGroup_ = proxyGroups_->GetString(selection).ToStdString();
+    }
+    else
+        selectedProxyGroup_.clear();
+    PopulateProxyTable();
+}
+
+void MainFrame::OnProxyGroupSelected(wxCommandEvent& event)
+{
+    if (event.GetEventObject() != proxyGroups_ || !proxyGroups_)
+        return;
+    const int selection = proxyGroups_->GetSelection();
+    if (selection == wxNOT_FOUND)
+        return;
+    selectedProxyGroup_ = proxyGroups_->GetString(selection).ToStdString();
+    PopulateProxyTable();
+}
+
+void MainFrame::PopulateProxyTable()
+{
+    if (!proxyTable_)
+        return;
+    proxyTable_->DeleteAllItems();
+    const auto proxies = proxyData_.find("proxies");
+    if (proxies == proxyData_.end() || !proxies->is_object())
+        return;
+    const auto members = proxyGroupMembers_.find(selectedProxyGroup_);
+    if (members == proxyGroupMembers_.end())
+        return;
+    const auto current = proxyCurrentSelection_.find(selectedProxyGroup_);
+    for (const auto& name : members->second)
+    {
+        const auto proxy = proxies->find(name);
+        if (proxy == proxies->end())
+            continue;
+        std::string delay = JsonString(&(*proxy), "now");
+        const auto history = proxy->find("history");
+        if (delay.empty() && history != proxy->end() && history->is_array() && !history->empty())
+        {
+            const auto& latest = history->back();
+            if (latest.contains("delay"))
             {
-                const auto& name = entry.key();
-                const auto& proxy = entry.value();
-                const auto type = JsonString(&proxy, "type");
-                const auto isGroup = type == "Selector" || type == "URLTest" ||
-                                     type == "Fallback" || type == "LoadBalance" ||
-                                     type == "Relay";
-                if (isGroup && proxyGroups_)
-                    proxyGroups_->Append(name);
-                std::string delay = JsonString(&proxy, "now");
-                if (delay.empty())
-                {
-                    const auto history = proxy.find("history");
-                    if (history != proxy.end() && history->is_array() && !history->empty())
-                    {
-                        const auto& latest = history->back();
-                        if (latest.contains("delay"))
-                        {
-                            try { delay = std::to_string(latest["delay"].get<std::uint64_t>()); }
-                            catch (const Json::type_error&) { delay = "-"; }
-                        }
-                    }
-                }
-                if (delay.empty())
-                    delay = "-";
-                const auto alive = proxy.contains("alive") ? proxy["alive"].get<bool>() : true;
-                if (proxyTable_)
-                {
-                    wxVector<wxVariant> values;
-                    values.push_back(wxString::FromUTF8(name));
-                    values.push_back(wxString::FromUTF8(type));
-                    values.push_back(wxString::FromUTF8(delay));
-                    values.push_back(alive ? "Available" : "Unavailable");
-                    proxyTable_->AppendItem(values);
-                }
+                try { delay = std::to_string(latest["delay"].get<std::uint64_t>()); }
+                catch (const Json::type_error&) { delay = "-"; }
             }
         }
-        if (proxyGroups_ && proxyGroups_->GetCount() > 0)
-            proxyGroups_->SetSelection(0);
+        if (delay.empty())
+            delay = "-";
+        const bool alive = !proxy->contains("alive") || (*proxy)["alive"].get<bool>();
+        const bool selected = current != proxyCurrentSelection_.end() &&
+                              current->second == name;
+        wxVector<wxVariant> values;
+        values.push_back(selected ? wxString::FromUTF8("✓ ") + wxString::FromUTF8(name)
+                                  : wxString::FromUTF8(name));
+        values.push_back(wxString::FromUTF8(JsonString(&(*proxy), "type")));
+        values.push_back(wxString::FromUTF8(delay));
+        values.push_back(selected ? wxString("Selected")
+                                  : wxString(alive ? "Available" : "Unavailable"));
+        proxyTable_->AppendItem(values);
     }
+}
+
+void MainFrame::OnProxySelected(wxDataViewEvent& event)
+{
+    if (event.GetEventObject() != proxyTable_ || !proxyTable_ || selectedProxyGroup_.empty())
+        return;
+    const int row = proxyTable_->ItemToRow(event.GetItem());
+    if (row == wxNOT_FOUND)
+        return;
+    SelectProxy();
+}
+
+void MainFrame::SelectProxy()
+{
+    if (!proxyTable_ || selectedProxyGroup_.empty())
+        return;
+    const int row = proxyTable_->GetSelectedRow();
+    if (row == wxNOT_FOUND)
+        return;
+    auto proxyName = proxyTable_->GetTextValue(row, 0).ToStdString();
+    if (proxyName.rfind("✓ ", 0) == 0)
+        proxyName.erase(0, 2);
+    const auto response = apiClient_.SelectProxy(selectedProxyGroup_, proxyName);
+    if (!response.ok)
+    {
+        AppendLog("[error] Proxy selection failed: " + wxString::FromUTF8(response.error) + "\n");
+        return;
+    }
+    proxyCurrentSelection_[selectedProxyGroup_] = proxyName;
+    PopulateProxyTable();
+    AppendLog("[info] Selected " + wxString::FromUTF8(proxyName) + " for " +
+              wxString::FromUTF8(selectedProxyGroup_) + "\n");
 }
 
 void MainFrame::RefreshRules()
@@ -759,7 +820,11 @@ void MainFrame::RefreshRules()
         return;
     const auto response = apiClient_.GetRules();
     if (!response.ok)
+    {
+        AppendLog("[error] Monitor error (/rules): " +
+                  wxString::FromUTF8(response.error) + "\n");
         return;
+    }
     Json root;
     try
     {
@@ -767,12 +832,13 @@ void MainFrame::RefreshRules()
     }
     catch (const Json::parse_error& exception)
     {
-        SetStatusText("Invalid /rules JSON: " + wxString::FromUTF8(exception.what()), 2);
+        AppendLog("[error] Invalid /rules JSON: " +
+                  wxString::FromUTF8(exception.what()) + "\n");
         return;
     }
     if (!root.is_object())
     {
-        SetStatusText("Invalid /rules JSON: expected an object", 2);
+        AppendLog("[error] Invalid /rules JSON: expected an object\n");
         return;
     }
     {
@@ -810,7 +876,7 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
         }
         wxMessageBox(wxString::FromUTF8(controllerError), "Invalid external controller",
                      wxOK | wxICON_ERROR, this);
-        SetStatusText(wxString::FromUTF8(controllerError), 2);
+        AppendLog("[error] " + wxString::FromUTF8(controllerError) + "\n");
         return;
     }
     mihomoConfig_.externalController = controller;
@@ -826,7 +892,7 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
     {
         std::cerr << "[WxClash] Sidecar error: " << startError << std::endl;
         apiConnected_ = false;
-        SetStatusText("Sidecar error: " + wxString::FromUTF8(startError), 2);
+        AppendLog("[error] Sidecar error: " + wxString::FromUTF8(startError) + "\n");
         return;
     }
 
@@ -836,9 +902,10 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
         std::cerr << "[WxClash] API error: " << response.error << std::endl;
         apiConnected_ = false;
         mihomoSidecar_.RequestStop();
-        SetStatusText("API error: " + wxString::FromUTF8(response.error), 2);
+        AppendLog("[error] API error: " + wxString::FromUTF8(response.error) + "\n");
         return;
     }
+    SetStatusText("API connected", 0);
     try
     {
         const auto versionRoot = Json::parse(response.body);
@@ -853,7 +920,6 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
     }
     apiConnected_ = true;
     RefreshCoreData();
-    SetStatusText("API connected", 2);
 }
 
 void MainFrame::OnDisconnectApi(wxCommandEvent&)
@@ -861,11 +927,13 @@ void MainFrame::OnDisconnectApi(wxCommandEvent&)
     apiConnected_ = false;
     if (!mihomoSidecar_.IsRunning())
     {
-        SetStatusText("Not connected", 2);
+        SetStatusText("Not connected", 0);
+        SetStatusText("", 1);
+        SetStatusText("", 2);
         return;
     }
 
-    SetStatusText("Disconnecting...", 2);
+    SetStatusText("Disconnecting...", 0);
     mihomoSidecar_.RequestStop();
 }
 
@@ -928,7 +996,7 @@ void MainFrame::OnBrowseConfig(wxCommandEvent&)
     std::string error;
     if (!mihomoConfig_.Load(dialog.GetPath().ToStdString(), error))
     {
-        SetStatusText(wxString::FromUTF8(error), 2);
+        AppendLog("[error] " + wxString::FromUTF8(error) + "\n");
         return;
     }
     configPath_ = dialog.GetPath().ToStdString();
@@ -954,7 +1022,7 @@ void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
         controllerText_->SelectAll();
         wxMessageBox(wxString::FromUTF8(controllerError), "Invalid external controller",
                      wxOK | wxICON_ERROR, this);
-        SetStatusText(wxString::FromUTF8(controllerError), 2);
+        AppendLog("[error] " + wxString::FromUTF8(controllerError) + "\n");
         return;
     }
     mihomoConfig_.secret = secretText_->GetValue().ToStdString();
@@ -998,7 +1066,7 @@ void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
     if (!mihomoConfig_.Save(path, error))
     {
         std::cerr << "[WxClash] " << error << std::endl;
-        SetStatusText(wxString::FromUTF8(error), 2);
+        AppendLog("[error] " + wxString::FromUTF8(error) + "\n");
         return;
     }
     configPath_ = path;

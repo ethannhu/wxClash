@@ -1,6 +1,5 @@
 #pragma once
 
-#include <functional>
 #include <string>
 #include <utility>
 
@@ -28,11 +27,6 @@ public:
     void SetSecret(std::string secret) { config_.secret = std::move(secret); }
     void SetTimeoutMs(int timeoutMs) { config_.timeoutMs = timeoutMs; }
 
-    void SetDebugCallback(std::function<void(const std::string&)> callback)
-    {
-        debugCallback_ = std::move(callback);
-    }
-
     MihomoApiResponse Request(const std::string& method,
                               const std::string& path,
                               const std::string& body = {}) const;
@@ -40,6 +34,8 @@ public:
     MihomoApiResponse GetVersion() const { return Request("GET", "/version"); }
     MihomoApiResponse GetConfig() const { return Request("GET", "/configs"); }
     MihomoApiResponse GetProxies() const { return Request("GET", "/proxies"); }
+    MihomoApiResponse SelectProxy(const std::string& group,
+                                  const std::string& proxy) const;
     MihomoApiResponse GetTraffic() const { return Request("GET", "/traffic"); }
     MihomoApiResponse GetMemory() const { return Request("GET", "/memory"); }
     MihomoApiResponse GetConnections() const { return Request("GET", "/connections"); }
@@ -48,5 +44,4 @@ public:
 
 private:
     MihomoApiConfig config_;
-    std::function<void(const std::string&)> debugCallback_;
 };

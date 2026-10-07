@@ -1,6 +1,6 @@
-3rdparty/wxWidgets/*
 build/*
-builddir/*
 out/*
 .vs
 tmp/*
+subprojects/*
+!subprojects/*.wrap

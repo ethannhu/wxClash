@@ -2,7 +2,7 @@
 
 ## Linux 编译运行
 
-安装构建工具和 wxWidgets 开发包（Debian/Ubuntu）：
+安装构建工具和系统开发包（Debian/Ubuntu）：
 
 ```bash
 sudo apt install build-essential meson ninja-build libwxgtk3.2-dev libyaml-cpp-dev
@@ -16,8 +16,7 @@ meson compile -C builddir
 ./builddir/WxClash
 ```
 
-Meson 通过 `wx-config` 查找 wxWidgets，并链接 `core`、`base` 和 `net` 组件。若系统安装的是其他 wxWidgets GTK 版本，只要该版本提供这些组件即可。
-Meson 同时通过 pkg-config 或 CMake 查找 `yaml-cpp`。
+Meson 优先使用系统中的 wxWidgets 和 `yaml-cpp`。如果系统未安装这些依赖，Meson 会根据 `subprojects/*.wrap` 自动下载固定版本，并通过 CMake 子项目构建它们。wxWidgets 链接 `core`、`base` 和 `net` 组件。
 
 重新配置已有构建目录：
 

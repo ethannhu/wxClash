@@ -1,0 +1,6 @@
+[wrap-git]
+directory = wxwidgets
+url = https://github.com/wxWidgets/wxWidgets.git
+revision = v3.2.8
+depth = 1
+method = cmake

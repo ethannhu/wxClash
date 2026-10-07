@@ -8,15 +8,50 @@ project(
   ],
 )
 
-# wx-config supplies the platform-specific include paths and libraries. The
-# application only needs the core, base, and networking components.
 wx_dep = dependency(
   'wxwidgets',
   modules: ['core', 'base', 'net'],
-  required: true,
+  required: false,
 )
+if not wx_dep.found()
+  cmake = import('cmake')
+  wx_subproject = cmake.subproject(
+    'wxwidgets',
+    options: [
+      'wxBUILD_SAMPLES=OFF',
+      'wxBUILD_TESTS=OFF',
+      'wxBUILD_DEMOS=OFF',
+      'wxBUILD_SHARED=OFF',
+      'wxBUILD_MONOLITHIC=OFF',
+    ],
+  )
+  wx_dep = declare_dependency(dependencies: [
+    wx_subproject.dependency('wx::core'),
+    wx_subproject.dependency('wx::base'),
+    wx_subproject.dependency('wx::net'),
+  ])
+endif
 
-yaml_cpp_dep = dependency('yaml-cpp', required: true)
+yaml_cpp_dep = dependency('yaml-cpp', required: false)
+if not yaml_cpp_dep.found()
+  cmake = import('cmake')
+  yaml_subproject = cmake.subproject(
+    'yaml-cpp',
+    options: [
+      'YAML_BUILD_SHARED_LIBS=OFF',
+      'YAML_CPP_BUILD_CONTRIB=OFF',
+      'YAML_CPP_BUILD_TOOLS=OFF',
+      'YAML_CPP_BUILD_TESTS=OFF',
+      'YAML_CPP_INSTALL=OFF',
+    ],
+  )
+  yaml_cpp_dep = yaml_subproject.dependency('yaml-cpp')
+endif
+nlohmann_json_dep = dependency(
+  'nlohmann_json',
+  required: true,
+  fallback: ['nlohmann_json', 'nlohmann_json_dep'],
+)
 
 cpp_args = []
 if host_machine.system() == 'windows'
@@ -37,7 +72,7 @@ executable(
     'src/core/mihomo_sidecar.cpp',
     'src/ui/main_frame.cpp',
   ],
-  dependencies: [wx_dep, yaml_cpp_dep],
+  dependencies: [wx_dep, yaml_cpp_dep, nlohmann_json_dep],
   cpp_args: cpp_args,
   win_subsystem: 'windows',
   install: false,

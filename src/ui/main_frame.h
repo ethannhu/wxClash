@@ -64,6 +64,8 @@ private:
     wxTextCtrl* logText_ = nullptr;
     wxStaticText* activeConnectionsMetric_ = nullptr;
     wxStaticText* memoryMetric_ = nullptr;
+    wxStaticText* downloadMetric_ = nullptr;
+    wxStaticText* uploadMetric_ = nullptr;
     wxDataViewListCtrl* proxyTable_ = nullptr;
     wxListBox* proxyGroups_ = nullptr;
     wxDataViewListCtrl* connectionTable_ = nullptr;

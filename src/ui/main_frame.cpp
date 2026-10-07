@@ -1,5 +1,7 @@
 #include "main_frame.h"
 
+#include <nlohmann/json.hpp>
+
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
@@ -30,31 +32,10 @@
 
 namespace
 {
+    using Json = nlohmann::json;
     constexpr int kSpacing = 8;
     constexpr int kPadding = 12;
     constexpr int kNavigationWidth = 150;
-
-    std::string NodeString(const YAML::Node& node, const char* key,
-                           const std::string& fallback = {})
-    {
-        const auto value = node[key];
-        return value ? value.as<std::string>() : fallback;
-    }
-
-    std::uint64_t NodeUint64(const YAML::Node& node, const char* key)
-    {
-        const auto value = node[key];
-        if (!value)
-            return 0;
-        try
-        {
-            return value.as<std::uint64_t>();
-        }
-        catch (...)
-        {
-            return 0;
-        }
-    }
 
     std::string FormatBytes(std::uint64_t bytes)
     {
@@ -74,6 +55,29 @@ namespace
                 output << value;
         output << ' ' << units[unit];
         return output.str();
+    }
+
+    std::string JsonString(const Json* object, const char* key,
+                           const std::string& fallback = {})
+    {
+        if (!object || !object->is_object() || !object->contains(key) ||
+            !(*object)[key].is_string())
+            return fallback;
+        return (*object)[key].get<std::string>();
+    }
+
+    std::uint64_t JsonUint64(const Json* object, const char* key)
+    {
+        if (!object || !object->is_object() || !object->contains(key))
+            return 0;
+        try
+        {
+            return (*object)[key].get<std::uint64_t>();
+        }
+        catch (const Json::type_error&)
+        {
+            return 0;
+        }
     }
 
     wxString SettingsPath()
@@ -276,6 +280,8 @@ void MainFrame::BuildPages()
     auto *metrics = new wxBoxSizer(wxHORIZONTAL);
     activeConnectionsMetric_ = AddMetric(overview, metrics, "Active connections", "0");
     memoryMetric_ = AddMetric(overview, metrics, "Mihomo memory", "0 MB");
+    downloadMetric_ = AddMetric(overview, metrics, "Download", "0 B/s");
+    uploadMetric_ = AddMetric(overview, metrics, "Upload", "0 B/s");
     overviewSizer->Add(metrics, 0, wxEXPAND | wxBOTTOM, kSpacing * 2);
 
     auto *shortcuts = new wxBoxSizer(wxHORIZONTAL);
@@ -565,57 +571,66 @@ void MainFrame::RefreshCoreData()
         return;
     }
 
+    Json connectionsRoot;
     try
     {
-        const auto connectionsRoot = YAML::Load(connectionsResponse.body);
-        const auto connections = connectionsRoot["connections"];
+        connectionsRoot = Json::parse(connectionsResponse.body);
+    }
+    catch (const Json::parse_error& exception)
+    {
+        SetStatusText("Invalid /connections JSON: " + wxString::FromUTF8(exception.what()), 2);
+        return;
+    }
+    if (!connectionsRoot.is_object())
+    {
+        SetStatusText("Invalid /connections JSON: expected an object", 2);
+        return;
+    }
+    {
+        const auto connections = connectionsRoot.find("connections");
         if (activeConnectionsMetric_)
             activeConnectionsMetric_->SetLabel(
-                std::to_string(connections && connections.IsSequence()
-                                   ? connections.size()
+                std::to_string(connections != connectionsRoot.end() && connections->is_array()
+                                   ? connections->size()
                                    : 0));
 
         if (connectionTable_)
         {
             connectionTable_->DeleteAllItems();
-            if (connections && connections.IsSequence())
+            if (connections != connectionsRoot.end() && connections->is_array())
             {
-                for (const auto& connection : connections)
+                for (const auto& connection : *connections)
                 {
-                    const auto metadata = connection["metadata"];
-                    std::string target = NodeString(metadata, "host");
+                    const auto metadata = connection.find("metadata");
+                    const auto metadataObject = metadata != connection.end() ? &(*metadata) : nullptr;
+                    std::string target = JsonString(metadataObject, "host");
                     if (target.empty())
-                        target = NodeString(metadata, "destinationIP");
-                    const auto port = NodeString(metadata, "destinationPort");
+                        target = JsonString(metadataObject, "destinationIP");
+                    const auto port = JsonString(metadataObject, "destinationPort");
                     if (!port.empty())
                         target += ":" + port;
 
                     std::string chains;
-                    const auto chain = connection["chains"];
-                    if (chain && chain.IsSequence())
+                    const auto chain = connection.find("chains");
+                    if (chain != connection.end() && chain->is_array())
                     {
-                        for (std::size_t index = 0; index < chain.size(); ++index)
+                        for (std::size_t index = 0; index < chain->size(); ++index)
                         {
                             if (index != 0)
                                 chains += " / ";
-                            chains += chain[index].as<std::string>();
+                            if ((*chain)[index].is_string())
+                                chains += (*chain)[index].get<std::string>();
                         }
                     }
                     connectionTable_->AppendItem(
                         {target,
-                         NodeString(metadata, "process"),
-                         NodeString(metadata, "network"),
-                         NodeString(connection, "rule"),
+                         JsonString(metadataObject, "process"),
+                         JsonString(metadataObject, "network"),
+                         JsonString(&connection, "rule"),
                          chains});
                 }
             }
         }
-    }
-    catch (const std::exception& exception)
-    {
-        SetStatusText("Invalid /connections response: " +
-                          wxString::FromUTF8(exception.what()),
-                      2);
     }
 
     const auto memoryResponse = apiClient_.GetMemory();
@@ -623,15 +638,30 @@ void MainFrame::RefreshCoreData()
     {
         try
         {
-            const auto memory = YAML::Load(memoryResponse.body);
+            const auto memory = Json::parse(memoryResponse.body);
             if (memoryMetric_)
-                memoryMetric_->SetLabel(FormatBytes(NodeUint64(memory, "inuse")));
+                memoryMetric_->SetLabel(FormatBytes(JsonUint64(&memory, "inuse")));
         }
-        catch (const std::exception& exception)
+        catch (const Json::parse_error& exception)
         {
-            SetStatusText("Invalid /memory response: " +
-                              wxString::FromUTF8(exception.what()),
-                          2);
+            SetStatusText("Invalid /memory JSON: " + wxString::FromUTF8(exception.what()), 2);
+        }
+    }
+
+    const auto trafficResponse = apiClient_.GetTraffic();
+    if (trafficResponse.ok)
+    {
+        try
+        {
+            const auto traffic = Json::parse(trafficResponse.body);
+            if (downloadMetric_)
+                downloadMetric_->SetLabel(FormatBytes(JsonUint64(&traffic, "down")) + "/s");
+            if (uploadMetric_)
+                uploadMetric_->SetLabel(FormatBytes(JsonUint64(&traffic, "up")) + "/s");
+        }
+        catch (const Json::parse_error& exception)
+        {
+            SetStatusText("Invalid /traffic JSON: " + wxString::FromUTF8(exception.what()), 2);
         }
     }
 
@@ -644,35 +674,56 @@ void MainFrame::RefreshProxies()
     const auto response = apiClient_.GetProxies();
     if (!response.ok)
         return;
+    Json root;
     try
     {
-        const auto proxies = YAML::Load(response.body)["proxies"];
+        root = Json::parse(response.body);
+    }
+    catch (const Json::parse_error& exception)
+    {
+        SetStatusText("Invalid /proxies JSON: " + wxString::FromUTF8(exception.what()), 2);
+        return;
+    }
+    if (!root.is_object())
+    {
+        SetStatusText("Invalid /proxies JSON: expected an object", 2);
+        return;
+    }
+    {
+        const auto proxies = root.find("proxies");
         if (proxyGroups_)
             proxyGroups_->Clear();
         if (proxyTable_)
             proxyTable_->DeleteAllItems();
-        if (proxies && proxies.IsMap())
+        if (proxies != root.end() && proxies->is_object())
         {
-            for (const auto& entry : proxies)
+            for (const auto& entry : proxies->items())
             {
-                const auto name = entry.first.as<std::string>();
-                const auto proxy = entry.second;
-                const auto type = NodeString(proxy, "type");
+                const auto& name = entry.key();
+                const auto& proxy = entry.value();
+                const auto type = JsonString(&proxy, "type");
                 const auto isGroup = type == "Selector" || type == "URLTest" ||
                                      type == "Fallback" || type == "LoadBalance" ||
                                      type == "Relay";
                 if (isGroup && proxyGroups_)
                     proxyGroups_->Append(name);
-                std::string delay = NodeString(proxy, "now");
+                std::string delay = JsonString(&proxy, "now");
                 if (delay.empty())
                 {
-                    const auto history = proxy["history"];
-                    if (history && history.IsSequence() && history.size() > 0)
-                        delay = NodeString(history[history.size() - 1], "delay");
+                    const auto history = proxy.find("history");
+                    if (history != proxy.end() && history->is_array() && !history->empty())
+                    {
+                        const auto& latest = history->back();
+                        if (latest.contains("delay"))
+                        {
+                            try { delay = std::to_string(latest["delay"].get<std::uint64_t>()); }
+                            catch (const Json::type_error&) { delay = "-"; }
+                        }
+                    }
                 }
                 if (delay.empty())
                     delay = "-";
-                const auto alive = proxy["alive"] ? proxy["alive"].as<bool>() : true;
+                const auto alive = proxy.contains("alive") ? proxy["alive"].get<bool>() : true;
                 if (proxyTable_)
                 {
                     wxVector<wxVariant> values;
@@ -687,11 +738,6 @@ void MainFrame::RefreshProxies()
         if (proxyGroups_ && proxyGroups_->GetCount() > 0)
             proxyGroups_->SetSelection(0);
     }
-    catch (const std::exception& exception)
-    {
-        SetStatusText("Invalid /proxies response: " +
-                          wxString::FromUTF8(exception.what()), 2);
-    }
 }
 
 void MainFrame::RefreshRules()
@@ -701,27 +747,35 @@ void MainFrame::RefreshRules()
     const auto response = apiClient_.GetRules();
     if (!response.ok)
         return;
+    Json root;
     try
     {
-        const auto rules = YAML::Load(response.body)["rules"];
+        root = Json::parse(response.body);
+    }
+    catch (const Json::parse_error& exception)
+    {
+        SetStatusText("Invalid /rules JSON: " + wxString::FromUTF8(exception.what()), 2);
+        return;
+    }
+    if (!root.is_object())
+    {
+        SetStatusText("Invalid /rules JSON: expected an object", 2);
+        return;
+    }
+    {
+        const auto rules = root.find("rules");
         if (ruleTable_)
         {
             ruleTable_->DeleteAllItems();
-            if (rules && rules.IsSequence())
+            if (rules != root.end() && rules->is_array())
             {
-                std::size_t index = 0;
-                for (const auto& rule : rules)
-                    ruleTable_->AppendItem({std::to_string(index++),
-                                            NodeString(rule, "type"),
-                                            NodeString(rule, "payload"),
-                                            NodeString(rule, "proxy")});
+                for (const auto& rule : *rules)
+                    ruleTable_->AppendItem({std::to_string(JsonUint64(&rule, "index")),
+                                            JsonString(&rule, "type"),
+                                            JsonString(&rule, "payload"),
+                                            JsonString(&rule, "proxy")});
             }
         }
-    }
-    catch (const std::exception& exception)
-    {
-        SetStatusText("Invalid /rules response: " +
-                          wxString::FromUTF8(exception.what()), 2);
     }
 }
 
@@ -773,14 +827,15 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
     }
     try
     {
-        const auto version = YAML::Load(response.body)["version"];
-        if (version)
-            SetStatusText("Mihomo " + wxString::FromUTF8(version.as<std::string>()), 0);
+        const auto versionRoot = Json::parse(response.body);
+        const auto version = versionRoot.find("version");
+        if (version != versionRoot.end() && version->is_string())
+            SetStatusText("Mihomo " + wxString::FromUTF8(version->get<std::string>()), 0);
     }
-    catch (...)
+    catch (const Json::parse_error&)
     {
-        // A successful controller response is still useful even if its
-        // optional version payload cannot be decoded.
+        // A successful controller response is still useful if the optional
+        // version payload cannot be decoded.
     }
     apiConnected_ = true;
     RefreshCoreData();

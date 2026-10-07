@@ -236,7 +236,6 @@ void MainFrame::BuildNavigation(wxSizer *parentSizer)
     AddNavigationButton(panel, sizer, "Overview", PageOverview);
     AddNavigationButton(panel, sizer, "Proxies", PageProxies);
     AddNavigationButton(panel, sizer, "Connections", PageConnections);
-    AddNavigationButton(panel, sizer, "Rules", PageRules);
     AddNavigationButton(panel, sizer, "Logs", PageLogs);
     AddNavigationButton(panel, sizer, "Settings", PageSettings);
     sizer->AddStretchSpacer(1);
@@ -306,18 +305,6 @@ void MainFrame::BuildPages()
     AddTableColumn(connectionTable_, "Rule", 150);
     AddTableColumn(connectionTable_, "Proxy chain", 180);
     connectionSizer->Add(connectionTable_, 1, wxEXPAND);
-
-    auto *rules = AddPage(book_, "Rules");
-    auto *ruleSizer = rules->GetSizer();
-    ruleSizer->Add(new wxStaticText(rules, wxID_ANY,
-                                    "Disabling a rule only affects the current runtime and is lost after restart."),
-                   0, wxBOTTOM, kSpacing);
-    ruleTable_ = new wxDataViewListCtrl(rules, wxID_ANY);
-    AddTableColumn(ruleTable_, "Index", 70);
-    AddTableColumn(ruleTable_, "Type", 120);
-    AddTableColumn(ruleTable_, "Match", 300);
-    AddTableColumn(ruleTable_, "Policy", 150);
-    ruleSizer->Add(ruleTable_, 1, wxEXPAND);
 
     auto *logs = AddPage(book_, "Logs");
     auto *logSizer = logs->GetSizer();
@@ -488,8 +475,6 @@ void MainFrame::OnNavigation(wxCommandEvent &event)
             RefreshCoreData();
         else if (page == PageProxies)
             RefreshProxies();
-        else if (page == PageRules)
-            RefreshRules();
     }
 }
 
@@ -911,50 +896,6 @@ void MainFrame::SelectProxy(const std::string& proxyName)
     PopulateProxyChoices();
     AppendLog("[info] Selected " + wxString::FromUTF8(proxyName) + " for " +
               wxString::FromUTF8(selectedProxyGroup_) + "\n");
-}
-
-void MainFrame::RefreshRules()
-{
-    if (!apiConnected_)
-        return;
-    const auto response = apiClient_.GetRules();
-    if (!response.ok)
-    {
-        AppendLog("[error] Monitor error (/rules): " +
-                  wxString::FromUTF8(response.error) + "\n");
-        return;
-    }
-    Json root;
-    try
-    {
-        root = Json::parse(response.body);
-    }
-    catch (const Json::parse_error& exception)
-    {
-        AppendLog("[error] Invalid /rules JSON: " +
-                  wxString::FromUTF8(exception.what()) + "\n");
-        return;
-    }
-    if (!root.is_object())
-    {
-        AppendLog("[error] Invalid /rules JSON: expected an object\n");
-        return;
-    }
-    {
-        const auto rules = root.find("rules");
-        if (ruleTable_)
-        {
-            ruleTable_->DeleteAllItems();
-            if (rules != root.end() && rules->is_array())
-            {
-                for (const auto& rule : *rules)
-                    ruleTable_->AppendItem({std::to_string(JsonUint64(&rule, "index")),
-                                            JsonString(&rule, "type"),
-                                            JsonString(&rule, "payload"),
-                                            JsonString(&rule, "proxy")});
-            }
-        }
-    }
 }
 
 void MainFrame::OnConnectApi(wxCommandEvent&)

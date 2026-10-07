@@ -40,7 +40,6 @@ public:
     MihomoApiResponse GetTraffic() const { return Request("GET", "/traffic"); }
     MihomoApiResponse GetMemory() const { return Request("GET", "/memory"); }
     MihomoApiResponse GetConnections() const { return Request("GET", "/connections"); }
-    MihomoApiResponse GetRules() const { return Request("GET", "/rules"); }
     MihomoApiResponse Restart() const { return Request("POST", "/restart"); }
 
 private:

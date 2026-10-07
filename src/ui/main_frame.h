@@ -40,7 +40,6 @@ private:
         PageOverview,
         PageProxies,
         PageConnections,
-        PageRules,
         PageLogs,
         PageSettings,
         PageCount
@@ -68,7 +67,6 @@ private:
     void RefreshProxyGroup();
     void PopulateProxyChoices();
     void SelectProxy(const std::string& proxyName);
-    void RefreshRules();
     void AppendLog(const wxString& message);
 
     wxSimplebook* book_ = nullptr;
@@ -80,7 +78,6 @@ private:
     std::vector<wxRadioButton*> proxyChoiceButtons_;
     wxSplitterWindow* proxySplitter_ = nullptr;
     wxDataViewListCtrl* connectionTable_ = nullptr;
-    wxDataViewListCtrl* ruleTable_ = nullptr;
     wxTextCtrl* corePathText_ = nullptr;
     wxTextCtrl* dataPathText_ = nullptr;
     wxTextCtrl* configPathText_ = nullptr;

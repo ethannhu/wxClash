@@ -18,7 +18,7 @@
 - `MainFrame` 主窗口。
 - 顶部 Mihomo 状态、流量和运行模式区域。
 - 左侧固定导航。
-- `概览`、`代理`、`连接`、`规则`、`日志`、`设置` 六个页面。
+- `概览`、`代理`、`连接`、`日志`、`设置` 五个页面。
 - 概览指标卡片和流量曲线占位区域。
 - 代理组、节点、连接和规则的表格占位数据。
 - 设置页面的连接设置和运行配置布局。
@@ -43,7 +43,6 @@ MainFrame
     │       ├── OverviewPage
     │       ├── ProxiesPage
     │       ├── ConnectionsPage
-    │       ├── RulesPage
     │       ├── LogsPage
     │       └── SettingsPage
     └── wxStatusBar

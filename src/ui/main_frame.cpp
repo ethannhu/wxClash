@@ -76,11 +76,6 @@ namespace
         return output.str();
     }
 
-    std::string FormatRate(std::uint64_t bytesPerSecond)
-    {
-        return FormatBytes(bytesPerSecond) + "/s";
-    }
-
     wxString SettingsPath()
     {
         const auto directory = wxString::FromUTF8(MihomoSidecar::DefaultDataPath());
@@ -186,6 +181,7 @@ namespace
 
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_BUTTON(wxID_HIGHEST + 4, MainFrame::OnConnectApi)
+    EVT_BUTTON(wxID_HIGHEST + 11, MainFrame::OnDisconnectApi)
     EVT_TIMER(wxID_HIGHEST + 8, MainFrame::OnSidecarOutput)
     EVT_TIMER(wxID_HIGHEST + 10, MainFrame::OnMonitorTimer)
     EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
@@ -232,7 +228,7 @@ MainFrame::MainFrame()
     int statusWidths[] = {-2, -2, -1};
     SetStatusWidths(3, statusWidths);
     SetStatusText("API 127.0.0.1:9090", 0);
-    SetStatusText("Down 0 B/s    Up 0 B/s", 1);
+    SetStatusText("", 1);
     SetStatusText("Not connected", 2);
     SetSizer(rootSizer);
     Centre();
@@ -277,34 +273,15 @@ void MainFrame::BuildPages()
     auto *overview = AddPage(book_, "Overview");
     auto *overviewSizer = overview->GetSizer();
 
-    auto *modeSizer = new wxBoxSizer(wxHORIZONTAL);
-    modeSizer->Add(new wxStaticText(overview, wxID_ANY, "Mode"), 0,
-                   wxALIGN_CENTER_VERTICAL | wxRIGHT, kSpacing);
-    modeChoice_ = new wxChoice(overview, wxID_ANY);
-    modeChoice_->Append("Rule");
-    modeChoice_->Append("Global");
-    modeChoice_->Append("Direct");
-    modeChoice_->SetSelection(0);
-    modeSizer->Add(modeChoice_, 0, wxALIGN_CENTER_VERTICAL);
-    overviewSizer->Add(modeSizer, 0, wxBOTTOM, kSpacing * 2);
-
     auto *metrics = new wxBoxSizer(wxHORIZONTAL);
-    downloadMetric_ = AddMetric(overview, metrics, "Download", "0 B/s");
-    uploadMetric_ = AddMetric(overview, metrics, "Upload", "0 B/s");
     activeConnectionsMetric_ = AddMetric(overview, metrics, "Active connections", "0");
     memoryMetric_ = AddMetric(overview, metrics, "Mihomo memory", "0 MB");
     overviewSizer->Add(metrics, 0, wxEXPAND | wxBOTTOM, kSpacing * 2);
 
-    auto *chartBox = new wxStaticBoxSizer(wxVERTICAL, overview,
-                                          "Traffic (last 120 seconds)");
-    trafficSummary_ = new wxStaticText(overview, wxID_ANY,
-                                       "Waiting for Mihomo traffic data...");
-    chartBox->Add(trafficSummary_, 1, wxALIGN_CENTER | wxALL, kPadding);
-    overviewSizer->Add(chartBox, 1, wxEXPAND | wxBOTTOM, kSpacing * 2);
-
     auto *shortcuts = new wxBoxSizer(wxHORIZONTAL);
     shortcuts->Add(new wxButton(overview, wxID_HIGHEST + 4, "Connect API"), 0,
                    wxRIGHT, kSpacing);
+    shortcuts->Add(new wxButton(overview, wxID_HIGHEST + 11, "Disconnect"), 0);
     overviewSizer->Add(shortcuts, 0);
 
     auto *proxies = AddPage(book_, "Proxies");
@@ -509,9 +486,6 @@ void MainFrame::BuildPages()
     if (logLengthChoice_->GetSelection() == wxNOT_FOUND)
         logLengthChoice_->SetSelection(2);
     ApplyPollingSettings();
-    const auto mode = mihomoConfig_.mode == "global" ? "Global" :
-                      mihomoConfig_.mode == "direct" ? "Direct" : "Rule";
-    modeChoice_->SetStringSelection(mode);
     settingsSizer->Add(notebook, 1, wxEXPAND);
 
     if (!corePath_.empty())
@@ -551,10 +525,6 @@ void MainFrame::OnModeChanged(wxCommandEvent &event)
                                    maxLogLength_));
         return;
     }
-    if (event.GetEventObject() != modeChoice_)
-        return;
-
-    SetStatusText("Mode: " + modeChoice_->GetStringSelection(), 2);
 }
 
 void MainFrame::OnSidecarOutput(wxTimerEvent&)
@@ -599,38 +569,11 @@ void MainFrame::RefreshCoreData()
     {
         const auto connectionsRoot = YAML::Load(connectionsResponse.body);
         const auto connections = connectionsRoot["connections"];
-        const auto downloadTotal = NodeUint64(connectionsRoot, "downloadTotal");
-        const auto uploadTotal = NodeUint64(connectionsRoot, "uploadTotal");
-
         if (activeConnectionsMetric_)
             activeConnectionsMetric_->SetLabel(
                 std::to_string(connections && connections.IsSequence()
                                    ? connections.size()
                                    : 0));
-
-        if (hasTrafficSample_)
-        {
-            const auto downloadDelta = downloadTotal >= lastDownloadTotal_
-                                           ? downloadTotal - lastDownloadTotal_
-                                           : 0;
-            const auto uploadDelta = uploadTotal >= lastUploadTotal_
-                                         ? uploadTotal - lastUploadTotal_
-                                         : 0;
-            if (downloadMetric_)
-                downloadMetric_->SetLabel(FormatRate(downloadDelta));
-            if (uploadMetric_)
-                uploadMetric_->SetLabel(FormatRate(uploadDelta));
-            if (trafficSummary_)
-                trafficSummary_->SetLabel(
-                    "Download " + wxString::FromUTF8(FormatRate(downloadDelta)) +
-                    "    Upload " + wxString::FromUTF8(FormatRate(uploadDelta)));
-            SetStatusText("Down " + wxString::FromUTF8(FormatRate(downloadDelta)) +
-                              "    Up " + wxString::FromUTF8(FormatRate(uploadDelta)),
-                          1);
-        }
-        lastDownloadTotal_ = downloadTotal;
-        lastUploadTotal_ = uploadTotal;
-        hasTrafficSample_ = true;
 
         if (connectionTable_)
         {
@@ -840,10 +783,18 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
         // optional version payload cannot be decoded.
     }
     apiConnected_ = true;
-    hasTrafficSample_ = false;
     RefreshCoreData();
     ApplyPollingSettings();
     SetStatusText("API connected", 2);
+}
+
+void MainFrame::OnDisconnectApi(wxCommandEvent&)
+{
+    monitorTimer_.Stop();
+    sidecarOutputTimer_.Stop();
+    apiConnected_ = false;
+    mihomoSidecar_.Stop();
+    SetStatusText("Not connected", 2);
 }
 
 void MainFrame::OnBrowseCore(wxCommandEvent&)

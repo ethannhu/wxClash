@@ -40,6 +40,29 @@ namespace
     }
 }
 
+class MihomoSidecarProcess final : public wxProcess
+{
+public:
+    explicit MihomoSidecarProcess(MihomoSidecar* owner)
+        : owner_(owner)
+    {
+    }
+
+    void DetachOwner()
+    {
+        owner_ = nullptr;
+    }
+
+    void OnTerminate(int pid, int status) override
+    {
+        if (owner_)
+            owner_->OnProcessTerminated(pid, status);
+    }
+
+private:
+    MihomoSidecar* owner_;
+};
+
 std::string MihomoSidecar::DefaultDataPath()
 {
 #ifdef __WXMSW__
@@ -88,12 +111,13 @@ bool MihomoSidecar::Start(const std::string& corePath,
                              Quote(ToWx(dataPath)) +
                              " -f " + Quote(ToWx(configPath));
 
-    process_ = std::make_unique<wxProcess>(nullptr);
+    process_ = new MihomoSidecarProcess(this);
     process_->Redirect();
-    pid_ = wxExecute(command, wxEXEC_ASYNC, process_.get());
+    pid_ = wxExecute(command, wxEXEC_ASYNC, process_);
     if (pid_ <= 0)
     {
-        process_.reset();
+        delete process_;
+        process_ = nullptr;
         return Fail(error, "Unable to start mihomo sidecar");
     }
 
@@ -120,13 +144,27 @@ void MihomoSidecar::Stop()
         return;
 
     PollOutput();
-    wxKill(pid_, wxSIGTERM);
+    const auto pid = pid_;
+    auto* process = process_;
+    if (process)
+        process->DetachOwner();
+    process_ = nullptr;
+    pid_ = -1;
+
+    wxKill(pid, wxSIGTERM);
     wxMilliSleep(100);
-    PollOutput();
-    wxKill(pid_, wxSIGKILL);
+    wxKill(pid, wxSIGKILL);
+    FlushPendingOutput();
+}
+
+void MihomoSidecar::OnProcessTerminated(long pid, int)
+{
+    if (pid != pid_)
+        return;
+
     PollOutput();
     FlushPendingOutput();
-    process_.reset();
+    process_ = nullptr;
     pid_ = -1;
 }
 
@@ -180,7 +218,7 @@ void MihomoSidecar::FlushPendingOutput()
 
 void MihomoSidecar::PollOutput()
 {
-    if (!process_)
+    if (!process_ || pid_ <= 0)
         return;
 
     DrainStream(process_->GetInputStream(), stdoutPending_, "[mihomo stdout]", false);

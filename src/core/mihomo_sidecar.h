@@ -9,6 +9,7 @@
 
 class MihomoApiClient;
 class wxInputStream;
+class MihomoSidecarProcess;
 
 class MihomoSidecar final
 {
@@ -35,12 +36,15 @@ public:
     bool IsRunning() const { return pid_ > 0; }
 
 private:
+    friend class MihomoSidecarProcess;
+
+    void OnProcessTerminated(long pid, int status);
     void DrainStream(wxInputStream* stream, std::string& pending,
                      const char* label, bool mirrorToConsole);
     void FlushPendingOutput();
 
     long pid_ = -1;
-    std::unique_ptr<wxProcess> process_;
+    MihomoSidecarProcess* process_ = nullptr;
     std::function<void(const std::string&)> outputCallback_;
     std::string stdoutPending_;
     std::string stderrPending_;

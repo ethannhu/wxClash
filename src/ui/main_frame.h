@@ -46,6 +46,7 @@ private:
     void OnNavigation(wxCommandEvent& event);
     void OnModeChanged(wxCommandEvent& event);
     void OnConnectApi(wxCommandEvent& event);
+    void OnDisconnectApi(wxCommandEvent& event);
     void OnSidecarOutput(wxTimerEvent& event);
     void OnMonitorTimer(wxTimerEvent& event);
     void OnBrowseCore(wxCommandEvent& event);
@@ -60,13 +61,9 @@ private:
     void ApplyPollingSettings();
 
     wxSimplebook* book_ = nullptr;
-    wxChoice* modeChoice_ = nullptr;
     wxTextCtrl* logText_ = nullptr;
-    wxStaticText* downloadMetric_ = nullptr;
-    wxStaticText* uploadMetric_ = nullptr;
     wxStaticText* activeConnectionsMetric_ = nullptr;
     wxStaticText* memoryMetric_ = nullptr;
-    wxStaticText* trafficSummary_ = nullptr;
     wxDataViewListCtrl* proxyTable_ = nullptr;
     wxListBox* proxyGroups_ = nullptr;
     wxDataViewListCtrl* connectionTable_ = nullptr;
@@ -98,9 +95,6 @@ private:
     MihomoSidecar mihomoSidecar_;
     wxTimer sidecarOutputTimer_;
     wxTimer monitorTimer_;
-    std::uint64_t lastDownloadTotal_ = 0;
-    std::uint64_t lastUploadTotal_ = 0;
-    bool hasTrafficSample_ = false;
     bool apiConnected_ = false;
     int pollingIntervalMs_ = 2000;
     std::size_t maxLogLength_ = 100000;

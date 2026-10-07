@@ -10,11 +10,13 @@
 #include <wx/filedlg.h>
 #include <wx/ffile.h>
 #include <wx/dataview.h>
-#include <wx/listbox.h>
 #include <wx/msgdlg.h>
 #include <wx/notebook.h>
 #include <wx/panel.h>
 #include <wx/filename.h>
+#include <wx/radiobox.h>
+#include <wx/radiobut.h>
+#include <wx/scrolwin.h>
 #include <wx/srchctrl.h>
 #include <wx/simplebook.h>
 #include <wx/sizer.h>
@@ -163,8 +165,8 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_CLOSE(MainFrame::OnClose)
     EVT_BUTTON(wxID_HIGHEST + 4, MainFrame::OnConnectApi)
     EVT_BUTTON(wxID_HIGHEST + 11, MainFrame::OnDisconnectApi)
-    EVT_LISTBOX(wxID_ANY, MainFrame::OnProxyGroupSelected)
-    EVT_DATAVIEW_SELECTION_CHANGED(wxID_ANY, MainFrame::OnProxySelected)
+    EVT_RADIOBOX(wxID_HIGHEST + 12, MainFrame::OnProxyGroupSelected)
+    EVT_RADIOBUTTON(wxID_HIGHEST + 13, MainFrame::OnProxySelected)
     EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
     EVT_BUTTON(wxID_HIGHEST + 6, MainFrame::OnBrowseDataPath)
     EVT_BUTTON(wxID_HIGHEST + 7, MainFrame::OnBrowseConfig)
@@ -268,14 +270,27 @@ void MainFrame::BuildPages()
                                           wxSP_LIVE_UPDATE | wxSP_3D);
     proxySplitter_->SetMinimumPaneSize(160);
     proxySplitter_->SetSashGravity(0.22);
-    proxyGroups_ = new wxListBox(proxySplitter_, wxID_ANY);
-    proxyGroups_->SetMinSize(wxSize(160, -1));
-    proxyTable_ = new wxDataViewListCtrl(proxySplitter_, wxID_ANY);
-    AddTableColumn(proxyTable_, "Name", 190);
-    AddTableColumn(proxyTable_, "Type", 110);
-    AddTableColumn(proxyTable_, "Delay", 90);
-    AddTableColumn(proxyTable_, "Status", 90);
-    proxySplitter_->SplitVertically(proxyGroups_, proxyTable_, 240);
+    proxyGroupsPane_ = new wxPanel(proxySplitter_);
+    proxyChoicesPane_ = new wxPanel(proxySplitter_);
+    proxyGroups_ = new wxRadioBox(proxyGroupsPane_, wxID_HIGHEST + 12,
+                                  "Groups", wxDefaultPosition, wxDefaultSize,
+                                  wxArrayString{"No groups"}, 1,
+                                  wxRA_SPECIFY_COLS);
+    auto *groupPaneSizer = new wxBoxSizer(wxVERTICAL);
+    groupPaneSizer->Add(proxyGroups_, 1, wxEXPAND);
+    proxyGroupsPane_->SetSizer(groupPaneSizer);
+    auto *choicePaneSizer = new wxBoxSizer(wxVERTICAL);
+    proxyChoicesScroll_ = new wxScrolledWindow(proxyChoicesPane_, wxID_ANY,
+                                               wxDefaultPosition, wxDefaultSize,
+                                               wxVSCROLL | wxBORDER_NONE);
+    proxyChoicesScroll_->SetScrollRate(0, 10);
+    auto *choiceScrollSizer = new wxBoxSizer(wxVERTICAL);
+    choiceScrollSizer->Add(new wxStaticText(proxyChoicesScroll_, wxID_ANY, "Proxies"),
+                            0, wxBOTTOM, kSpacing);
+    proxyChoicesScroll_->SetSizer(choiceScrollSizer);
+    choicePaneSizer->Add(proxyChoicesScroll_, 1, wxEXPAND);
+    proxyChoicesPane_->SetSizer(choicePaneSizer);
+    proxySplitter_->SplitVertically(proxyGroupsPane_, proxyChoicesPane_, 240);
     proxySizer->Add(new wxSearchCtrl(proxies, wxID_ANY), 0,
                     wxEXPAND | wxBOTTOM, kSpacing);
     proxySizer->Add(proxySplitter_, 1, wxEXPAND);
@@ -642,14 +657,14 @@ void MainFrame::RefreshProxies()
     proxyData_ = root;
     proxyGroupMembers_.clear();
     proxyCurrentSelection_.clear();
+    proxyGroupNames_.clear();
+    updatingProxyGroups_ = true;
     const auto proxies = root.find("proxies");
     if (proxies == root.end() || !proxies->is_object())
     {
         AppendLog("[error] Invalid /proxies JSON: missing object field 'proxies'\n");
         return;
     }
-    if (proxyGroups_)
-        proxyGroups_->Clear();
     if (proxies->empty())
         AppendLog("[warning] Proxy refresh returned no proxy entries\n");
     else
@@ -680,43 +695,121 @@ void MainFrame::RefreshProxies()
                             proxyGroupMembers_[name].push_back(member.get<std::string>());
             }
             proxyCurrentSelection_[name] = JsonString(&proxy, "now");
-            if (proxyGroups_)
-                proxyGroups_->Append(wxString::FromUTF8(name));
+            proxyGroupNames_.push_back(name);
         }
     }
-    if (proxyGroups_ && proxyGroups_->GetCount() > 0)
+    auto *groupSizer = proxyGroupsPane_ ? proxyGroupsPane_->GetSizer() : nullptr;
+    if (groupSizer)
+    {
+        groupSizer->Detach(proxyGroups_);
+        proxyGroups_->Destroy();
+        wxArrayString labels;
+        for (const auto& name : proxyGroupNames_)
+            labels.Add(wxString::FromUTF8(name));
+        if (labels.empty())
+            labels.Add("No groups");
+        proxyGroups_ = new wxRadioBox(proxyGroupsPane_, wxID_HIGHEST + 12,
+                                      "Groups", wxDefaultPosition, wxDefaultSize,
+                                      labels, 1, wxRA_SPECIFY_COLS);
+        groupSizer->Add(proxyGroups_, 1, wxEXPAND);
+        proxyGroupsPane_->Layout();
+    }
+    if (!proxyGroupNames_.empty())
     {
         int selection = proxyGroups_->FindString(wxString::FromUTF8(selectedProxyGroup_));
         if (selection == wxNOT_FOUND)
             selection = 0;
         proxyGroups_->SetSelection(selection);
-        selectedProxyGroup_ = proxyGroups_->GetString(selection).ToStdString();
+        selectedProxyGroup_ = proxyGroupNames_[static_cast<std::size_t>(selection)];
     }
     else
         selectedProxyGroup_.clear();
-    PopulateProxyTable();
+    updatingProxyGroups_ = false;
+    PopulateProxyChoices();
 }
 
 void MainFrame::OnProxyGroupSelected(wxCommandEvent& event)
 {
     if (event.GetEventObject() != proxyGroups_ || !proxyGroups_)
         return;
-    const int selection = proxyGroups_->GetSelection();
-    if (selection == wxNOT_FOUND)
+    if (updatingProxyGroups_)
         return;
-    selectedProxyGroup_ = proxyGroups_->GetString(selection).ToStdString();
-    PopulateProxyTable();
+    const int selection = proxyGroups_->GetSelection();
+    if (selection == wxNOT_FOUND || static_cast<std::size_t>(selection) >= proxyGroupNames_.size())
+        return;
+    selectedProxyGroup_ = proxyGroupNames_[static_cast<std::size_t>(selection)];
+    RefreshProxyGroup();
 }
 
-void MainFrame::PopulateProxyTable()
+void MainFrame::RefreshProxyGroup()
 {
-    if (!proxyTable_)
+    if (selectedProxyGroup_.empty())
     {
-        AppendLog("[error] Proxy refresh failed: proxy table is unavailable\n");
+        AppendLog("[error] Proxy group refresh failed: group name is empty\n");
+        return;
+    }
+
+    const auto response = apiClient_.GetProxy(selectedProxyGroup_);
+    if (!response.ok)
+    {
+        AppendLog("[error] Proxy group refresh failed (" +
+                  wxString::FromUTF8(selectedProxyGroup_) + "): " +
+                  wxString::FromUTF8(response.error) + "\n");
+        return;
+    }
+
+    Json group;
+    try
+    {
+        group = Json::parse(response.body);
+    }
+    catch (const Json::parse_error& exception)
+    {
+        AppendLog("[error] Invalid proxy group JSON (" +
+                  wxString::FromUTF8(selectedProxyGroup_) + "): " +
+                  wxString::FromUTF8(exception.what()) + "\n");
+        return;
+    }
+    if (!group.is_object())
+    {
+        AppendLog("[error] Invalid proxy group JSON: expected an object\n");
+        return;
+    }
+
+    std::vector<std::string> members;
+    const auto all = group.find("all");
+    if (all != group.end() && all->is_array())
+        for (const auto& member : *all)
+            if (member.is_string())
+                members.push_back(member.get<std::string>());
+    if (members.empty())
+    {
+        const auto proxies = group.find("proxies");
+        if (proxies != group.end() && proxies->is_array())
+            for (const auto& member : *proxies)
+                if (member.is_string())
+                    members.push_back(member.get<std::string>());
+    }
+    if (members.empty())
+    {
+        AppendLog("[error] Proxy group has no members in API response: " +
+                  wxString::FromUTF8(selectedProxyGroup_) + "\n");
+        return;
+    }
+
+    proxyGroupMembers_[selectedProxyGroup_] = std::move(members);
+    proxyCurrentSelection_[selectedProxyGroup_] = JsonString(&group, "now");
+    PopulateProxyChoices();
+}
+
+void MainFrame::PopulateProxyChoices()
+{
+    if (!proxyChoicesScroll_)
+    {
         return;
     }
     updatingProxyTable_ = true;
-    proxyTable_->DeleteAllItems();
+    proxyChoiceNames_.clear();
     const auto proxies = proxyData_.find("proxies");
     if (proxies == proxyData_.end() || !proxies->is_object())
     {
@@ -740,57 +833,65 @@ void MainFrame::PopulateProxyTable()
         {
             // Keep the member visible even when this controller omits its
             // detail object from the top-level /proxies response.
-            const bool selected = current != proxyCurrentSelection_.end() &&
-                                  current->second == name;
-            wxVector<wxVariant> values;
-            values.push_back(wxString::FromUTF8(name));
-            values.push_back(wxString("Proxy"));
-            values.push_back(wxString("-"));
-            values.push_back(selected ? wxString("Selected") : wxString("Available"));
-            proxyTable_->AppendItem(values);
+            proxyChoiceNames_.push_back(name);
             continue;
         }
-        std::string delay = JsonString(&(*proxy), "now");
-        const auto history = proxy->find("history");
-        if (delay.empty() && history != proxy->end() && history->is_array() && !history->empty())
-        {
-            const auto& latest = history->back();
-            if (latest.contains("delay"))
-            {
-                try { delay = std::to_string(latest["delay"].get<std::uint64_t>()); }
-                catch (const Json::type_error&) { delay = "-"; }
-            }
-        }
-        if (delay.empty())
-            delay = "-";
-        const bool alive = !proxy->contains("alive") || (*proxy)["alive"].get<bool>();
-        const bool selected = current != proxyCurrentSelection_.end() &&
-                              current->second == name;
-        wxVector<wxVariant> values;
-        values.push_back(wxString::FromUTF8(name));
-        values.push_back(wxString::FromUTF8(JsonString(&(*proxy), "type")));
-        values.push_back(wxString::FromUTF8(delay));
-        values.push_back(selected ? wxString("Selected")
-                                  : wxString(alive ? "Available" : "Unavailable"));
-        proxyTable_->AppendItem(values);
+        proxyChoiceNames_.push_back(name);
     }
+    auto *choiceSizer = proxyChoicesScroll_->GetSizer();
+    proxyChoiceButtons_.clear();
+    choiceSizer->Clear(true);
+    choiceSizer->Add(new wxStaticText(proxyChoicesScroll_, wxID_ANY, "Proxies"),
+                     0, wxBOTTOM, kSpacing);
+    for (const auto& name : proxyChoiceNames_)
+    {
+        const auto proxy = proxies->find(name);
+        std::string label = name;
+        if (proxy != proxies->end())
+            label += "  [" + JsonString(&(*proxy), "type", "Proxy") + "]";
+        if (current != proxyCurrentSelection_.end() && current->second == name)
+            label += "  (selected)";
+        auto *button = new wxRadioButton(proxyChoicesScroll_, wxID_HIGHEST + 13,
+                                         wxString::FromUTF8(label),
+                                         wxDefaultPosition, wxDefaultSize,
+                                         proxyChoiceButtons_.empty() ? wxRB_GROUP : 0);
+        proxyChoiceButtons_.push_back(button);
+        choiceSizer->Add(button, 0, wxEXPAND | wxBOTTOM, 4);
+    }
+    const auto currentName = proxyCurrentSelection_.find(selectedProxyGroup_);
+    if (currentName != proxyCurrentSelection_.end())
+    {
+        const auto selectedIndex = std::find(proxyChoiceNames_.begin(),
+                                             proxyChoiceNames_.end(),
+                                             currentName->second);
+        if (selectedIndex != proxyChoiceNames_.end())
+            proxyChoiceButtons_[static_cast<std::size_t>(std::distance(
+                proxyChoiceNames_.begin(), selectedIndex))]->SetValue(true);
+    }
+    if (proxyChoiceButtons_.empty())
+        choiceSizer->Add(new wxStaticText(proxyChoicesScroll_, wxID_ANY, "No proxies"),
+                         0, wxEXPAND);
+    proxyChoicesScroll_->FitInside();
+    proxyChoicesScroll_->Layout();
     updatingProxyTable_ = false;
 }
 
-void MainFrame::OnProxySelected(wxDataViewEvent& event)
+void MainFrame::OnProxySelected(wxCommandEvent& event)
 {
-    if (event.GetEventObject() != proxyTable_ || !proxyTable_ ||
-        updatingProxyTable_ || selectedProxyGroup_.empty())
+    if (updatingProxyTable_ || selectedProxyGroup_.empty())
         return;
-    const int row = proxyTable_->ItemToRow(event.GetItem());
-    if (row == wxNOT_FOUND)
+    auto *button = dynamic_cast<wxRadioButton*>(event.GetEventObject());
+    const auto it = std::find(proxyChoiceButtons_.begin(),
+                              proxyChoiceButtons_.end(), button);
+    if (it == proxyChoiceButtons_.end())
         return;
-    SelectProxy(proxyTable_->GetTextValue(static_cast<unsigned int>(row), 0).ToStdString());
+    SelectProxy(proxyChoiceNames_[static_cast<std::size_t>(
+        std::distance(proxyChoiceButtons_.begin(), it))]);
 }
 
 void MainFrame::SelectProxy(const std::string& proxyName)
 {
-    if (!proxyTable_ || selectedProxyGroup_.empty())
+    if (!proxyChoicesScroll_ || selectedProxyGroup_.empty())
     {
         AppendLog("[error] Proxy selection failed: no proxy group is selected\n");
         return;
@@ -807,7 +908,7 @@ void MainFrame::SelectProxy(const std::string& proxyName)
         return;
     }
     proxyCurrentSelection_[selectedProxyGroup_] = proxyName;
-    PopulateProxyTable();
+    PopulateProxyChoices();
     AppendLog("[info] Selected " + wxString::FromUTF8(proxyName) + " for " +
               wxString::FromUTF8(selectedProxyGroup_) + "\n");
 }

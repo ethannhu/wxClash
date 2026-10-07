@@ -17,9 +17,11 @@
 class wxCheckBox;
 class wxChoice;
 class wxDataViewListCtrl;
-class wxDataViewEvent;
-class wxListBox;
 class wxSimplebook;
+class wxRadioBox;
+class wxRadioButton;
+class wxPanel;
+class wxScrolledWindow;
 class wxSizer;
 class wxSplitterWindow;
 class wxStaticText;
@@ -55,7 +57,7 @@ private:
     void OnDisconnectApi(wxCommandEvent& event);
     void OnClose(wxCloseEvent& event);
     void OnProxyGroupSelected(wxCommandEvent& event);
-    void OnProxySelected(wxDataViewEvent& event);
+    void OnProxySelected(wxCommandEvent& event);
     void OnBrowseCore(wxCommandEvent& event);
     void OnBrowseDataPath(wxCommandEvent& event);
     void OnBrowseConfig(wxCommandEvent& event);
@@ -63,15 +65,19 @@ private:
     void UpdateMihomoControls();
     void RefreshCoreData();
     void RefreshProxies();
-    void PopulateProxyTable();
+    void RefreshProxyGroup();
+    void PopulateProxyChoices();
     void SelectProxy(const std::string& proxyName);
     void RefreshRules();
     void AppendLog(const wxString& message);
 
     wxSimplebook* book_ = nullptr;
     wxTextCtrl* logText_ = nullptr;
-    wxDataViewListCtrl* proxyTable_ = nullptr;
-    wxListBox* proxyGroups_ = nullptr;
+    wxRadioBox* proxyGroups_ = nullptr;
+    wxPanel* proxyGroupsPane_ = nullptr;
+    wxPanel* proxyChoicesPane_ = nullptr;
+    wxScrolledWindow* proxyChoicesScroll_ = nullptr;
+    std::vector<wxRadioButton*> proxyChoiceButtons_;
     wxSplitterWindow* proxySplitter_ = nullptr;
     wxDataViewListCtrl* connectionTable_ = nullptr;
     wxDataViewListCtrl* ruleTable_ = nullptr;
@@ -104,9 +110,12 @@ private:
     std::size_t maxLogLength_ = 100000;
     std::map<std::string, std::vector<std::string>> proxyGroupMembers_;
     std::map<std::string, std::string> proxyCurrentSelection_;
+    std::vector<std::string> proxyGroupNames_;
+    std::vector<std::string> proxyChoiceNames_;
     nlohmann::json proxyData_;
     std::string selectedProxyGroup_;
     bool updatingProxyTable_ = false;
+    bool updatingProxyGroups_ = false;
 
     wxDECLARE_EVENT_TABLE();
 };

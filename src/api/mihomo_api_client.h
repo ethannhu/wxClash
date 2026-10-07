@@ -34,6 +34,7 @@ public:
     MihomoApiResponse GetVersion() const { return Request("GET", "/version"); }
     MihomoApiResponse GetConfig() const { return Request("GET", "/configs"); }
     MihomoApiResponse GetProxies() const { return Request("GET", "/proxies"); }
+    MihomoApiResponse GetProxy(const std::string& group) const;
     MihomoApiResponse SelectProxy(const std::string& group,
                                   const std::string& proxy) const;
     MihomoApiResponse GetTraffic() const { return Request("GET", "/traffic"); }

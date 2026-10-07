@@ -339,3 +339,8 @@ MihomoApiResponse MihomoApiClient::SelectProxy(const std::string& group,
     return Request("PUT", "/proxies/" + UrlEncode(group),
                    nlohmann::json{{"name", proxy}}.dump());
 }
+
+MihomoApiResponse MihomoApiClient::GetProxy(const std::string& group) const
+{
+    return Request("GET", "/proxies/" + UrlEncode(group));
+}

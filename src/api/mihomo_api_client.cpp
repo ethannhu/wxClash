@@ -3,24 +3,99 @@
 #include <wx/socket.h>
 
 #include <cstdint>
+#include <cctype>
+#include <algorithm>
+#include <chrono>
 #include <optional>
 #include <utility>
 
 namespace
 {
-    std::optional<std::size_t> ContentLength(const std::string& raw)
+    std::optional<std::string> HeaderValue(const std::string& raw,
+                                           const char* headerName)
     {
         const auto headerEnd = raw.find("\r\n\r\n");
         if (headerEnd == std::string::npos)
             return std::nullopt;
-        const auto name = raw.find("Content-Length:");
-        if (name == std::string::npos || name > headerEnd)
+
+        const std::string expected(headerName);
+        std::size_t lineStart = 0;
+        while (lineStart < headerEnd)
+        {
+            const auto lineEnd = raw.find("\r\n", lineStart);
+            if (lineEnd == std::string::npos || lineEnd > headerEnd)
+                break;
+            const auto colon = raw.find(':', lineStart);
+            if (colon != std::string::npos && colon < lineEnd)
+            {
+                auto name = raw.substr(lineStart, colon - lineStart);
+                std::transform(name.begin(), name.end(), name.begin(),
+                               [](unsigned char character) {
+                                   return static_cast<char>(std::tolower(character));
+                               });
+                if (name == expected)
+                {
+                    auto valueStart = raw.find_first_not_of(" \t", colon + 1);
+                    if (valueStart == std::string::npos || valueStart >= lineEnd)
+                        return std::string{};
+                    return raw.substr(valueStart, lineEnd - valueStart);
+                }
+            }
+            lineStart = lineEnd + 2;
+        }
+        return std::nullopt;
+    }
+
+    std::optional<std::size_t> ContentLength(const std::string& raw)
+    {
+        const auto value = HeaderValue(raw, "content-length");
+        if (!value)
             return std::nullopt;
-        const auto valueStart = raw.find_first_not_of(" \t", name + 15);
-        const auto valueEnd = raw.find("\r\n", valueStart);
         try
         {
-            return std::stoull(raw.substr(valueStart, valueEnd - valueStart));
+            return std::stoull(*value);
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    }
+
+    std::optional<std::string> FirstChunkedBody(const std::string& raw)
+    {
+        const auto headerEnd = raw.find("\r\n\r\n");
+        if (headerEnd == std::string::npos)
+            return std::nullopt;
+
+        const auto transferEncoding = HeaderValue(raw, "transfer-encoding");
+        if (!transferEncoding)
+            return std::nullopt;
+        std::string encoding = *transferEncoding;
+        std::transform(encoding.begin(), encoding.end(), encoding.begin(),
+                       [](unsigned char character) {
+                           return static_cast<char>(std::tolower(character));
+                       });
+        if (encoding.find("chunked") == std::string::npos)
+            return std::nullopt;
+
+        const auto sizeStart = headerEnd + 4;
+        const auto sizeEnd = raw.find("\r\n", sizeStart);
+        if (sizeEnd == std::string::npos)
+            return std::nullopt;
+        const auto extension = raw.find(';', sizeStart);
+        const auto sizeTextEnd = extension != std::string::npos && extension < sizeEnd
+                                     ? extension
+                                     : sizeEnd;
+        try
+        {
+            const auto chunkSize = std::stoull(
+                raw.substr(sizeStart, sizeTextEnd - sizeStart), nullptr, 16);
+            const auto chunkStart = sizeEnd + 2;
+            if (raw.size() < chunkStart + chunkSize + 2)
+                return std::nullopt;
+            if (raw.compare(chunkStart + chunkSize, 2, "\r\n") != 0)
+                return std::nullopt;
+            return raw.substr(chunkStart, chunkSize);
         }
         catch (...)
         {
@@ -101,8 +176,16 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
 
     std::string raw;
     char buffer[4096];
-    while (socket.WaitForRead(0, config_.timeoutMs))
+    std::optional<std::string> chunkedBody;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(config_.timeoutMs);
+    while (std::chrono::steady_clock::now() < deadline)
     {
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now()).count();
+        const auto waitMs = static_cast<long>(std::min<std::int64_t>(100, remaining));
+        if (waitMs <= 0 || !socket.WaitForRead(0, waitMs))
+            continue;
         socket.Read(buffer, sizeof(buffer));
         const auto count = socket.LastCount();
         if (count == 0)
@@ -110,6 +193,12 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
         raw.append(buffer, count);
 
         const auto headerEnd = raw.find("\r\n\r\n");
+        if (headerEnd != std::string::npos)
+        {
+            chunkedBody = FirstChunkedBody(raw);
+            if (chunkedBody)
+                break;
+        }
         const auto length = ContentLength(raw);
         if (headerEnd != std::string::npos && length &&
             raw.size() - headerEnd - 4 >= *length)
@@ -149,6 +238,15 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
         return response;
     }
     response.body = raw.substr(headerEnd + 4);
+    if (HeaderValue(raw, "transfer-encoding"))
+    {
+        if (!chunkedBody)
+        {
+            response.error = "Incomplete chunked Controller response";
+            return response;
+        }
+        response.body = *chunkedBody;
+    }
     response.ok = response.status >= 200 && response.status < 300;
     if (!response.ok)
         response.error = "Controller returned HTTP " + std::to_string(response.status);

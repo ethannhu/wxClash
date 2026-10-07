@@ -63,7 +63,8 @@ private:
     void OnBrowseCore(wxCommandEvent& event);
     void OnBrowseDataPath(wxCommandEvent& event);
     void OnBrowseConfig(wxCommandEvent& event);
-    void OnSaveMihomoConfig(wxCommandEvent& event);
+    bool SaveMihomoSettings(std::string& error);
+    bool PrepareRuntimeConfig(std::string& runtimePath, std::string& error);
     void UpdateMihomoControls();
     void RefreshCoreData();
     void RefreshProxies();

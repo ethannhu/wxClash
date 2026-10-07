@@ -25,6 +25,8 @@ struct MihomoConfig
     std::vector<std::string> dnsNameservers = {"223.5.5.5", "8.8.8.8"};
 
     bool Load(const std::string& path, std::string& error);
+    bool LoadOverrides(const std::string& path, std::string& error);
+    bool SaveOverrides(const std::string& path, std::string& error) const;
     bool Save(const std::string& path, std::string& error) const;
 
 private:

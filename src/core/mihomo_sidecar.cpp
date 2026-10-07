@@ -73,7 +73,7 @@ MihomoSidecar::~MihomoSidecar() = default;
 
 bool MihomoSidecar::Start(const std::string& corePath,
                           const std::string& dataPath,
-                          const std::string& configPath,
+                          const std::string& runtimeConfigPath,
                           const MihomoApiClient& apiClient,
                           wxEvtHandler* processParent,
                           std::string& error)
@@ -94,7 +94,7 @@ bool MihomoSidecar::Start(const std::string& corePath,
         return Fail(error, "WxClash data directory is empty");
     if (!MakeDirectory(ToWx(dataPath)))
         return Fail(error, "Unable to create WxClash data directory");
-    if (configPath.empty() || !wxFileName::FileExists(ToWx(configPath)))
+    if (runtimeConfigPath.empty() || !wxFileName::FileExists(ToWx(runtimeConfigPath)))
         return Fail(error, "mihomo config path is empty or does not exist");
 
     const auto Quote = [](const wxString& value) {
@@ -102,7 +102,7 @@ bool MihomoSidecar::Start(const std::string& corePath,
     };
     const wxString command = Quote(core) + " -d " +
                              Quote(ToWx(dataPath)) +
-                             " -f " + Quote(ToWx(configPath));
+                             " -f " + Quote(ToWx(runtimeConfigPath));
 
     process_ = new MihomoSidecarProcess(this, processParent);
     process_->Redirect();

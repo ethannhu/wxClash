@@ -88,6 +88,18 @@ namespace
         return wxFileName(directory, "settings.conf").GetFullPath();
     }
 
+    std::string MihomoOverridesPath(const std::string& dataPath)
+    {
+        return wxFileName(wxString::FromUTF8(dataPath), "mihomo-settings.yaml")
+            .GetFullPath().ToStdString();
+    }
+
+    std::string MihomoRuntimePath(const std::string& dataPath)
+    {
+        return wxFileName(wxString::FromUTF8(dataPath), "runtime.yaml")
+            .GetFullPath().ToStdString();
+    }
+
     void LoadSettings(std::string& corePath, std::string& dataPath,
                       std::string& configPath, std::size_t& maxLogLength)
     {
@@ -170,7 +182,6 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
     EVT_BUTTON(wxID_HIGHEST + 6, MainFrame::OnBrowseDataPath)
     EVT_BUTTON(wxID_HIGHEST + 7, MainFrame::OnBrowseConfig)
-    EVT_BUTTON(wxID_HIGHEST + 9, MainFrame::OnSaveMihomoConfig)
     EVT_BUTTON(wxID_ANY, MainFrame::OnNavigation)
         EVT_CHOICE(wxID_ANY, MainFrame::OnModeChanged)
             wxEND_EVENT_TABLE()
@@ -189,6 +200,8 @@ MainFrame::MainFrame()
                           .GetFullPath().ToStdString();
     std::string configError;
     if (!mihomoConfig_.Load(configPath_, configError))
+        std::cerr << "[WxClash] " << configError << std::endl;
+    if (!mihomoConfig_.LoadOverrides(MihomoOverridesPath(dataPath_), configError))
         std::cerr << "[WxClash] " << configError << std::endl;
 
     mihomoSidecar_.SetOutputCallback([this](const std::string& message) {
@@ -226,6 +239,11 @@ MainFrame::~MainFrame()
 {
     sidecarOutputTimer_.Stop();
     monitorTimer_.Stop();
+    if (mihomoModeChoice_)
+    {
+        std::string ignoredError;
+        SaveMihomoSettings(ignoredError);
+    }
     if (configPathText_)
         configPath_ = configPathText_->GetValue().ToStdString();
     SaveSettings(corePath_, dataPath_, configPath_, maxLogLength_);
@@ -440,14 +458,6 @@ void MainFrame::BuildPages()
     mihomoForm->AddGrowableCol(1, 1);
     mihomoPageSizer->Add(mihomoForm, 1, wxEXPAND | wxALL, kSpacing);
 
-    auto *configActions = new wxBoxSizer(wxHORIZONTAL);
-    configActions->Add(new wxButton(mihomoPage, wxID_HIGHEST + 7, "Import"),
-                       0);
-    configActions->AddStretchSpacer(1);
-    configActions->Add(new wxButton(mihomoPage, wxID_HIGHEST + 9, "Save"),
-                       0);
-    mihomoPageSizer->Add(configActions, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
-                         kSpacing);
     mihomoPage->SetSizer(mihomoPageSizer);
     auto *displayForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
     logLengthChoice_ = new wxChoice(settings, wxID_ANY);
@@ -932,6 +942,16 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
     dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : std::string{};
     configPath_ = configPathText_ ? configPathText_->GetValue().ToStdString() : configPath_;
 
+    std::string runtimeConfigPath;
+    std::string settingsError;
+    if (!PrepareRuntimeConfig(runtimeConfigPath, settingsError))
+    {
+        wxMessageBox(wxString::FromUTF8(settingsError), "Invalid Mihomo settings",
+                     wxOK | wxICON_ERROR, this);
+        AppendLog("[error] " + wxString::FromUTF8(settingsError) + "\n");
+        return;
+    }
+
     auto controller = controllerText_ ? controllerText_->GetValue().ToStdString()
                                       : mihomoConfig_.externalController;
     std::string controllerError;
@@ -955,7 +975,7 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
     apiClient_.SetTimeoutMs(3000);
 
     std::string startError;
-    if (!mihomoSidecar_.Start(corePath_, dataPath_, configPath_,
+    if (!mihomoSidecar_.Start(corePath_, dataPath_, runtimeConfigPath,
                               apiClient_, this, startError))
     {
         std::cerr << "[WxClash] Sidecar error: " << startError << std::endl;
@@ -1061,6 +1081,13 @@ void MainFrame::OnBrowseDataPath(wxCommandEvent&)
         dataPath_ = dialog.GetPath().ToStdString();
         if (dataPathText_)
             dataPathText_->SetValue(dialog.GetPath());
+        std::string error;
+        if (!mihomoConfig_.LoadOverrides(MihomoOverridesPath(dataPath_), error))
+        {
+            AppendLog("[error] " + wxString::FromUTF8(error) + "\n");
+            return;
+        }
+        UpdateMihomoControls();
     }
 }
 
@@ -1081,16 +1108,21 @@ void MainFrame::OnBrowseConfig(wxCommandEvent&)
         AppendLog("[error] " + wxString::FromUTF8(error) + "\n");
         return;
     }
+    if (!mihomoConfig_.LoadOverrides(MihomoOverridesPath(dataPath_), error))
+    {
+        AppendLog("[error] " + wxString::FromUTF8(error) + "\n");
+        return;
+    }
     configPath_ = dialog.GetPath().ToStdString();
     if (configPathText_)
         configPathText_->SetValue(dialog.GetPath());
     UpdateMihomoControls();
     SaveSettings(corePath_, dataPath_, configPath_, maxLogLength_);
     if (overviewStatus_)
-        overviewStatus_->SetLabel("Config imported: " + dialog.GetFilename());
+        overviewStatus_->SetLabel("Base config selected: " + dialog.GetFilename());
 }
 
-void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
+bool MainFrame::SaveMihomoSettings(std::string& error)
 {
     dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : dataPath_;
     mihomoConfig_.mode = mihomoModeChoice_->GetStringSelection().ToStdString();
@@ -1106,7 +1138,7 @@ void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
         wxMessageBox(wxString::FromUTF8(controllerError), "Invalid external controller",
                      wxOK | wxICON_ERROR, this);
         AppendLog("[error] " + wxString::FromUTF8(controllerError) + "\n");
-        return;
+        return false;
     }
     mihomoConfig_.secret = secretText_->GetValue().ToStdString();
     mihomoConfig_.allowLan = allowLanCheck_->GetValue();
@@ -1135,30 +1167,21 @@ void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
     if (mihomoConfig_.dnsNameservers.empty())
         mihomoConfig_.dnsNameservers = {"223.5.5.5", "8.8.8.8"};
 
-    const wxFileName currentPath(configPathText_ ? configPathText_->GetValue()
-                                                  : wxString::FromUTF8(configPath_));
-    wxFileDialog dialog(this, "Save mihomo config", currentPath.GetPath(),
-                        currentPath.GetFullName(),
-                        "YAML files (*.yaml;*.yml)|*.yaml;*.yml|All files|*.*",
-                        wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
-    if (dialog.ShowModal() != wxID_OK)
-        return;
+    return mihomoConfig_.SaveOverrides(MihomoOverridesPath(dataPath_), error);
+}
 
-    const auto path = dialog.GetPath().ToStdString();
-    std::string error;
-    if (!mihomoConfig_.Save(path, error))
+bool MainFrame::PrepareRuntimeConfig(std::string& runtimePath, std::string& error)
+{
+    dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : dataPath_;
+    if (dataPath_.empty())
     {
-        std::cerr << "[WxClash] " << error << std::endl;
-        AppendLog("[error] " + wxString::FromUTF8(error) + "\n");
-        return;
+        error = "WxClash data directory is empty";
+        return false;
     }
-    configPath_ = path;
-    if (configPathText_)
-        configPathText_->SetValue(dialog.GetPath());
-    SaveSettings(corePath_, dataPath_, configPath_, maxLogLength_);
-    std::cerr << "[WxClash] Saved mihomo config: " << path << std::endl;
-    if (overviewStatus_)
-        overviewStatus_->SetLabel("Mihomo config saved");
+    if (!SaveMihomoSettings(error))
+        return false;
+    runtimePath = MihomoRuntimePath(dataPath_);
+    return mihomoConfig_.Save(runtimePath, error);
 }
 
 void MainFrame::UpdateMihomoControls()

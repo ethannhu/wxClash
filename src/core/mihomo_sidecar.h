@@ -24,7 +24,7 @@ public:
 
     bool Start(const std::string& corePath,
                const std::string& dataPath,
-               const std::string& configPath,
+               const std::string& runtimeConfigPath,
                const MihomoApiClient& apiClient,
                wxEvtHandler* processParent,
                std::string& error);

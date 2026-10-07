@@ -255,15 +255,18 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
         if (waitMs <= 0 || !socket.WaitForRead(0, waitMs))
             continue;
         socket.Read(buffer, sizeof(buffer));
-        if (socket.Error())
-        {
-            response.error = "Unable to read Controller response";
-            return response;
-        }
         const auto count = socket.LastReadCount();
         if (count == 0)
             break;
         raw.append(buffer, count);
+
+        // wxSocket may retain an EOF/error flag together with the final bytes.
+        // The HTTP response is still usable when those bytes complete it.
+        if (socket.Error() && raw.find("\r\n\r\n") == std::string::npos)
+        {
+            response.error = "Unable to read Controller response";
+            return response;
+        }
 
         const auto headerEnd = raw.find("\r\n\r\n");
         if (headerEnd != std::string::npos)
@@ -322,7 +325,11 @@ MihomoApiResponse MihomoApiClient::Request(const std::string& method,
     }
     response.ok = response.status >= 200 && response.status < 300;
     if (!response.ok)
+    {
         response.error = "Controller returned HTTP " + std::to_string(response.status);
+        if (!response.body.empty())
+            response.error += ": " + response.body;
+    }
     return response;
 }
 

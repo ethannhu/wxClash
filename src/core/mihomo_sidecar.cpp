@@ -114,9 +114,6 @@ bool MihomoSidecar::Start(const std::string& corePath,
         return Fail(error, "Unable to start mihomo sidecar");
     }
 
-    if (startCallback_)
-        startCallback_();
-
     MihomoApiClient probe = apiClient;
     probe.SetTimeoutMs(300);
     for (int attempt = 0; attempt < kReadyAttempts; ++attempt)

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <wx/frame.h>
-#include <wx/timer.h>
 
 #include <nlohmann/json.hpp>
 
@@ -22,6 +21,7 @@ class wxDataViewEvent;
 class wxListBox;
 class wxSimplebook;
 class wxSizer;
+class wxSplitterWindow;
 class wxStaticText;
 class wxTextCtrl;
 class wxWindow;
@@ -54,8 +54,6 @@ private:
     void OnConnectApi(wxCommandEvent& event);
     void OnDisconnectApi(wxCommandEvent& event);
     void OnClose(wxCloseEvent& event);
-    void OnSidecarOutput(wxTimerEvent& event);
-    void OnMonitorTimer(wxTimerEvent& event);
     void OnProxyGroupSelected(wxCommandEvent& event);
     void OnProxySelected(wxDataViewEvent& event);
     void OnBrowseCore(wxCommandEvent& event);
@@ -66,15 +64,15 @@ private:
     void RefreshCoreData();
     void RefreshProxies();
     void PopulateProxyTable();
-    void SelectProxy();
+    void SelectProxy(const std::string& proxyName);
     void RefreshRules();
     void AppendLog(const wxString& message);
-    void ApplyPollingSettings();
 
     wxSimplebook* book_ = nullptr;
     wxTextCtrl* logText_ = nullptr;
     wxDataViewListCtrl* proxyTable_ = nullptr;
     wxListBox* proxyGroups_ = nullptr;
+    wxSplitterWindow* proxySplitter_ = nullptr;
     wxDataViewListCtrl* connectionTable_ = nullptr;
     wxDataViewListCtrl* ruleTable_ = nullptr;
     wxTextCtrl* corePathText_ = nullptr;
@@ -90,7 +88,6 @@ private:
     wxTextCtrl* controllerText_ = nullptr;
     wxTextCtrl* secretText_ = nullptr;
     wxTextCtrl* nameserverText_ = nullptr;
-    wxChoice* pollingIntervalChoice_ = nullptr;
     wxChoice* logLengthChoice_ = nullptr;
     wxCheckBox* allowLanCheck_ = nullptr;
     wxCheckBox* ipv6Check_ = nullptr;
@@ -102,16 +99,14 @@ private:
     MihomoConfig mihomoConfig_;
     MihomoApiClient apiClient_;
     MihomoSidecar mihomoSidecar_;
-    wxTimer sidecarOutputTimer_;
-    wxTimer monitorTimer_;
     bool apiConnected_ = false;
     bool closing_ = false;
-    int pollingIntervalMs_ = 2000;
     std::size_t maxLogLength_ = 100000;
     std::map<std::string, std::vector<std::string>> proxyGroupMembers_;
     std::map<std::string, std::string> proxyCurrentSelection_;
     nlohmann::json proxyData_;
     std::string selectedProxyGroup_;
+    bool updatingProxyTable_ = false;
 
     wxDECLARE_EVENT_TABLE();
 };

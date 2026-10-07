@@ -18,6 +18,7 @@
 #include <wx/srchctrl.h>
 #include <wx/simplebook.h>
 #include <wx/sizer.h>
+#include <wx/splitter.h>
 #include <wx/statbox.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
@@ -88,8 +89,7 @@ namespace
     }
 
     void LoadSettings(std::string& corePath, std::string& dataPath,
-                      std::string& configPath, int& pollingIntervalMs,
-                      std::size_t& maxLogLength)
+                      std::string& configPath, std::size_t& maxLogLength)
     {
         wxFFile file(SettingsPath(), "r");
         if (!file.IsOpened())
@@ -109,13 +109,6 @@ namespace
                 dataPath = line.Mid(10).ToStdString();
             else if (line.StartsWith("config_path="))
                 configPath = line.Mid(12).ToStdString();
-            else if (line.StartsWith("polling_interval_ms="))
-            {
-                long value = 0;
-                if (line.Mid(20).ToLong(&value) &&
-                    (value == 1000 || value == 2000 || value == 5000 || value == 10000))
-                    pollingIntervalMs = static_cast<int>(value);
-            }
             else if (line.StartsWith("max_log_length="))
             {
                 unsigned long value = 0;
@@ -128,8 +121,7 @@ namespace
     }
 
     void SaveSettings(const std::string& corePath, const std::string& dataPath,
-                      const std::string& configPath, int pollingIntervalMs,
-                      std::size_t maxLogLength)
+                      const std::string& configPath, std::size_t maxLogLength)
     {
         wxFFile file(SettingsPath(), "w");
         if (!file.IsOpened())
@@ -142,7 +134,6 @@ namespace
         const wxString contents = "core_path=" + wxString::FromUTF8(corePath) +
                                   "\ndata_path=" + wxString::FromUTF8(dataPath) +
                                   "\nconfig_path=" + wxString::FromUTF8(configPath) +
-                                  "\npolling_interval_ms=" + wxString::Format("%d", pollingIntervalMs) +
                                   "\nmax_log_length=" + wxString::Format("%zu", maxLogLength) +
                                   "\n";
         if (!file.Write(contents) || !file.Close())
@@ -172,8 +163,6 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_CLOSE(MainFrame::OnClose)
     EVT_BUTTON(wxID_HIGHEST + 4, MainFrame::OnConnectApi)
     EVT_BUTTON(wxID_HIGHEST + 11, MainFrame::OnDisconnectApi)
-    EVT_TIMER(wxID_HIGHEST + 8, MainFrame::OnSidecarOutput)
-    EVT_TIMER(wxID_HIGHEST + 10, MainFrame::OnMonitorTimer)
     EVT_LISTBOX(wxID_ANY, MainFrame::OnProxyGroupSelected)
     EVT_DATAVIEW_SELECTION_CHANGED(wxID_ANY, MainFrame::OnProxySelected)
     EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
@@ -186,11 +175,9 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
 
 MainFrame::MainFrame()
     : wxFrame(nullptr, wxID_ANY, "WxClash", wxDefaultPosition, wxSize(1100, 700),
-      wxDEFAULT_FRAME_STYLE),
-      sidecarOutputTimer_(this, wxID_HIGHEST + 8),
-      monitorTimer_(this, wxID_HIGHEST + 10)
+      wxDEFAULT_FRAME_STYLE)
 {
-    LoadSettings(corePath_, dataPath_, configPath_, pollingIntervalMs_, maxLogLength_);
+    LoadSettings(corePath_, dataPath_, configPath_, maxLogLength_);
     if (dataPath_.empty())
         dataPath_ = MihomoSidecar::DefaultDataPath();
     if (configPath_.empty())
@@ -204,8 +191,6 @@ MainFrame::MainFrame()
         AppendLog(wxString::FromUTF8(message) + "\n");
     });
     mihomoSidecar_.SetTerminationCallback([this] {
-        sidecarOutputTimer_.Stop();
-        monitorTimer_.Stop();
         if (closing_)
             Destroy();
         else
@@ -215,11 +200,6 @@ MainFrame::MainFrame()
             SetStatusText("", 2);
         }
     });
-    mihomoSidecar_.SetStartCallback([this] {
-        sidecarOutputTimer_.Start(pollingIntervalMs_);
-        monitorTimer_.Start(pollingIntervalMs_);
-    });
-    ApplyPollingSettings();
 
     auto *rootSizer = new wxBoxSizer(wxVERTICAL);
     auto *contentSizer = new wxBoxSizer(wxHORIZONTAL);
@@ -243,7 +223,7 @@ MainFrame::~MainFrame()
 {
     if (configPathText_)
         configPath_ = configPathText_->GetValue().ToStdString();
-    SaveSettings(corePath_, dataPath_, configPath_, pollingIntervalMs_, maxLogLength_);
+    SaveSettings(corePath_, dataPath_, configPath_, maxLogLength_);
 }
 
 void MainFrame::BuildNavigation(wxSizer *parentSizer)
@@ -283,18 +263,22 @@ void MainFrame::BuildPages()
 
     auto *proxies = AddPage(book_, "Proxies");
     auto *proxySizer = proxies->GetSizer();
-    auto *proxySplit = new wxBoxSizer(wxHORIZONTAL);
-    proxyGroups_ = new wxListBox(proxies, wxID_ANY);
-    proxySplit->Add(proxyGroups_, 0, wxEXPAND | wxRIGHT, kSpacing);
-    proxyTable_ = new wxDataViewListCtrl(proxies, wxID_ANY);
+    proxySplitter_ = new wxSplitterWindow(proxies, wxID_ANY, wxDefaultPosition,
+                                          wxDefaultSize,
+                                          wxSP_LIVE_UPDATE | wxSP_3D);
+    proxySplitter_->SetMinimumPaneSize(160);
+    proxySplitter_->SetSashGravity(0.22);
+    proxyGroups_ = new wxListBox(proxySplitter_, wxID_ANY);
+    proxyGroups_->SetMinSize(wxSize(160, -1));
+    proxyTable_ = new wxDataViewListCtrl(proxySplitter_, wxID_ANY);
     AddTableColumn(proxyTable_, "Name", 190);
     AddTableColumn(proxyTable_, "Type", 110);
     AddTableColumn(proxyTable_, "Delay", 90);
     AddTableColumn(proxyTable_, "Status", 90);
-    proxySplit->Add(proxyTable_, 1, wxEXPAND);
+    proxySplitter_->SplitVertically(proxyGroups_, proxyTable_, 240);
     proxySizer->Add(new wxSearchCtrl(proxies, wxID_ANY), 0,
                     wxEXPAND | wxBOTTOM, kSpacing);
-    proxySizer->Add(proxySplit, 1, wxEXPAND);
+    proxySizer->Add(proxySplitter_, 1, wxEXPAND);
 
     auto *connections = AddPage(book_, "Connections");
     auto *connectionSizer = connections->GetSizer();
@@ -450,19 +434,12 @@ void MainFrame::BuildPages()
 
     auto *displayPage = new wxPanel(notebook);
     auto *displayForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
-    pollingIntervalChoice_ = new wxChoice(displayPage, wxID_ANY);
-    pollingIntervalChoice_->Append("1 second");
-    pollingIntervalChoice_->Append("2 seconds");
-    pollingIntervalChoice_->Append("5 seconds");
-    pollingIntervalChoice_->Append("10 seconds");
     logLengthChoice_ = new wxChoice(displayPage, wxID_ANY);
     logLengthChoice_->Append("10,000 characters");
     logLengthChoice_->Append("50,000 characters");
     logLengthChoice_->Append("100,000 characters");
     logLengthChoice_->Append("500,000 characters");
     logLengthChoice_->Append("1,000,000 characters");
-    displayForm->Add(new wxStaticText(displayPage, wxID_ANY, "Monitor interval"));
-    displayForm->Add(pollingIntervalChoice_, 1, wxEXPAND);
     displayForm->Add(new wxStaticText(displayPage, wxID_ANY, "Maximum log length"));
     displayForm->Add(logLengthChoice_, 1, wxEXPAND);
     displayForm->AddGrowableCol(1, 1);
@@ -470,19 +447,12 @@ void MainFrame::BuildPages()
     notebook->AddPage(displayPage, "Display");
 
     UpdateMihomoControls();
-    const int pollingValues[] = {1000, 2000, 5000, 10000};
     const std::size_t logLengthValues[] = {10000, 50000, 100000, 500000, 1000000};
-    for (unsigned int index = 0; index < 4; ++index)
-        if (pollingValues[index] == pollingIntervalMs_)
-            pollingIntervalChoice_->SetSelection(index);
     for (unsigned int index = 0; index < 5; ++index)
         if (logLengthValues[index] == maxLogLength_)
             logLengthChoice_->SetSelection(index);
-    if (pollingIntervalChoice_->GetSelection() == wxNOT_FOUND)
-        pollingIntervalChoice_->SetSelection(1);
     if (logLengthChoice_->GetSelection() == wxNOT_FOUND)
         logLengthChoice_->SetSelection(2);
-    ApplyPollingSettings();
     settingsSizer->Add(notebook, 1, wxEXPAND);
 
     if (!corePath_.empty())
@@ -499,7 +469,9 @@ void MainFrame::OnNavigation(wxCommandEvent &event)
     if (page >= 0 && page < PageCount)
     {
         book_->SetSelection(page);
-        if (page == PageProxies)
+        if (page == PageOverview || page == PageConnections)
+            RefreshCoreData();
+        else if (page == PageProxies)
             RefreshProxies();
         else if (page == PageRules)
             RefreshRules();
@@ -508,25 +480,15 @@ void MainFrame::OnNavigation(wxCommandEvent &event)
 
 void MainFrame::OnModeChanged(wxCommandEvent &event)
 {
-    if (event.GetEventObject() == pollingIntervalChoice_ ||
-        event.GetEventObject() == logLengthChoice_)
+    if (event.GetEventObject() == logLengthChoice_)
     {
-        const int pollingValues[] = {1000, 2000, 5000, 10000};
         const std::size_t logLengthValues[] = {10000, 50000, 100000, 500000, 1000000};
-        if (pollingIntervalChoice_->GetSelection() >= 0)
-            pollingIntervalMs_ = pollingValues[pollingIntervalChoice_->GetSelection()];
         if (logLengthChoice_->GetSelection() >= 0)
             maxLogLength_ = logLengthValues[logLengthChoice_->GetSelection()];
-        ApplyPollingSettings();
         AppendLog(wxString::Format("[info] Display settings updated; log limit: %zu characters\n",
                                    maxLogLength_));
         return;
     }
-}
-
-void MainFrame::OnSidecarOutput(wxTimerEvent&)
-{
-    mihomoSidecar_.PollOutput();
 }
 
 void MainFrame::AppendLog(const wxString& message)
@@ -539,23 +501,11 @@ void MainFrame::AppendLog(const wxString& message)
         logText_->Remove(0, static_cast<long>(length - maxLogLength_));
 }
 
-void MainFrame::ApplyPollingSettings()
-{
-    if (sidecarOutputTimer_.IsRunning())
-        sidecarOutputTimer_.Start(pollingIntervalMs_);
-    if (monitorTimer_.IsRunning())
-        monitorTimer_.Start(pollingIntervalMs_);
-}
-
-void MainFrame::OnMonitorTimer(wxTimerEvent&)
+void MainFrame::RefreshCoreData()
 {
     if (!apiConnected_)
         return;
-    RefreshCoreData();
-}
 
-void MainFrame::RefreshCoreData()
-{
     const auto connectionsResponse = apiClient_.GetConnections();
     if (!connectionsResponse.ok)
     {
@@ -709,6 +659,16 @@ void MainFrame::RefreshProxies()
                 for (const auto& member : *all)
                     if (member.is_string())
                         proxyGroupMembers_[name].push_back(member.get<std::string>());
+            // Some controller versions expose the group members as `proxies`
+            // instead of `all`; accept both response shapes.
+            if (proxyGroupMembers_[name].empty())
+            {
+                const auto members = proxy.find("proxies");
+                if (members != proxy.end() && members->is_array())
+                    for (const auto& member : *members)
+                        if (member.is_string())
+                            proxyGroupMembers_[name].push_back(member.get<std::string>());
+            }
             proxyCurrentSelection_[name] = JsonString(&proxy, "now");
             if (proxyGroups_)
                 proxyGroups_->Append(wxString::FromUTF8(name));
@@ -742,19 +702,38 @@ void MainFrame::PopulateProxyTable()
 {
     if (!proxyTable_)
         return;
+    updatingProxyTable_ = true;
     proxyTable_->DeleteAllItems();
     const auto proxies = proxyData_.find("proxies");
     if (proxies == proxyData_.end() || !proxies->is_object())
+    {
+        updatingProxyTable_ = false;
         return;
+    }
     const auto members = proxyGroupMembers_.find(selectedProxyGroup_);
     if (members == proxyGroupMembers_.end())
+    {
+        updatingProxyTable_ = false;
         return;
+    }
     const auto current = proxyCurrentSelection_.find(selectedProxyGroup_);
     for (const auto& name : members->second)
     {
         const auto proxy = proxies->find(name);
         if (proxy == proxies->end())
+        {
+            // Keep the member visible even when this controller omits its
+            // detail object from the top-level /proxies response.
+            const bool selected = current != proxyCurrentSelection_.end() &&
+                                  current->second == name;
+            wxVector<wxVariant> values;
+            values.push_back(wxString::FromUTF8(name));
+            values.push_back(wxString("Proxy"));
+            values.push_back(wxString("-"));
+            values.push_back(selected ? wxString("Selected") : wxString("Available"));
+            proxyTable_->AppendItem(values);
             continue;
+        }
         std::string delay = JsonString(&(*proxy), "now");
         const auto history = proxy->find("history");
         if (delay.empty() && history != proxy->end() && history->is_array() && !history->empty())
@@ -772,36 +751,33 @@ void MainFrame::PopulateProxyTable()
         const bool selected = current != proxyCurrentSelection_.end() &&
                               current->second == name;
         wxVector<wxVariant> values;
-        values.push_back(selected ? wxString::FromUTF8("✓ ") + wxString::FromUTF8(name)
-                                  : wxString::FromUTF8(name));
+        values.push_back(wxString::FromUTF8(name));
         values.push_back(wxString::FromUTF8(JsonString(&(*proxy), "type")));
         values.push_back(wxString::FromUTF8(delay));
         values.push_back(selected ? wxString("Selected")
                                   : wxString(alive ? "Available" : "Unavailable"));
         proxyTable_->AppendItem(values);
     }
+    updatingProxyTable_ = false;
 }
 
 void MainFrame::OnProxySelected(wxDataViewEvent& event)
 {
-    if (event.GetEventObject() != proxyTable_ || !proxyTable_ || selectedProxyGroup_.empty())
+    if (event.GetEventObject() != proxyTable_ || !proxyTable_ ||
+        updatingProxyTable_ || selectedProxyGroup_.empty())
         return;
     const int row = proxyTable_->ItemToRow(event.GetItem());
     if (row == wxNOT_FOUND)
         return;
-    SelectProxy();
+    SelectProxy(proxyTable_->GetTextValue(static_cast<unsigned int>(row), 0).ToStdString());
 }
 
-void MainFrame::SelectProxy()
+void MainFrame::SelectProxy(const std::string& proxyName)
 {
     if (!proxyTable_ || selectedProxyGroup_.empty())
         return;
-    const int row = proxyTable_->GetSelectedRow();
-    if (row == wxNOT_FOUND)
+    if (proxyName.empty())
         return;
-    auto proxyName = proxyTable_->GetTextValue(row, 0).ToStdString();
-    if (proxyName.rfind("✓ ", 0) == 0)
-        proxyName.erase(0, 2);
     const auto response = apiClient_.SelectProxy(selectedProxyGroup_, proxyName);
     if (!response.ok)
     {
@@ -884,7 +860,7 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
         controller = "http://" + controller;
     apiClient_.SetBaseUrl(controller);
     apiClient_.SetSecret(mihomoConfig_.secret);
-    apiClient_.SetTimeoutMs(1000);
+    apiClient_.SetTimeoutMs(3000);
 
     std::string startError;
     if (!mihomoSidecar_.Start(corePath_, dataPath_, configPath_,
@@ -1003,7 +979,7 @@ void MainFrame::OnBrowseConfig(wxCommandEvent&)
     if (configPathText_)
         configPathText_->SetValue(dialog.GetPath());
     UpdateMihomoControls();
-    SaveSettings(corePath_, dataPath_, configPath_, pollingIntervalMs_, maxLogLength_);
+    SaveSettings(corePath_, dataPath_, configPath_, maxLogLength_);
     SetStatusText("Config imported: " + dialog.GetFilename(), 2);
 }
 
@@ -1072,7 +1048,7 @@ void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
     configPath_ = path;
     if (configPathText_)
         configPathText_->SetValue(dialog.GetPath());
-    SaveSettings(corePath_, dataPath_, configPath_, pollingIntervalMs_, maxLogLength_);
+    SaveSettings(corePath_, dataPath_, configPath_, maxLogLength_);
     std::cerr << "[WxClash] Saved mihomo config: " << path << std::endl;
     SetStatusText("Mihomo config saved", 2);
 }

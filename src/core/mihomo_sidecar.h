@@ -3,7 +3,6 @@
 #include <functional>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include <wx/process.h>
 
@@ -29,11 +28,15 @@ public:
                const MihomoApiClient& apiClient,
                wxEvtHandler* processParent,
                std::string& error);
-    void StopAsync(std::function<void()> onStopped);
+    void RequestStop();
     void PollOutput();
     void SetOutputCallback(std::function<void(const std::string&)> callback)
     {
         outputCallback_ = std::move(callback);
+    }
+    void SetTerminationCallback(std::function<void()> callback)
+    {
+        terminationCallback_ = std::move(callback);
     }
     bool IsRunning() const { return pid_ > 0; }
 
@@ -48,8 +51,7 @@ private:
     long pid_ = -1;
     MihomoSidecarProcess* process_ = nullptr;
     std::function<void(const std::string&)> outputCallback_;
+    std::function<void()> terminationCallback_;
     std::string stdoutPending_;
     std::string stderrPending_;
-    bool stopping_ = false;
-    std::vector<std::function<void()>> stopCallbacks_;
 };

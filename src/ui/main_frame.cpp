@@ -219,6 +219,12 @@ MainFrame::MainFrame()
     mihomoSidecar_.SetOutputCallback([this](const std::string& message) {
         AppendLog(wxString::FromUTF8(message) + "\n");
     });
+    mihomoSidecar_.SetTerminationCallback([this] {
+        if (closing_)
+            Destroy();
+        else
+            SetStatusText("Not connected", 2);
+    });
     ApplyPollingSettings();
 
     auto *rootSizer = new wxBoxSizer(wxVERTICAL);
@@ -855,9 +861,7 @@ void MainFrame::OnDisconnectApi(wxCommandEvent&)
     }
 
     SetStatusText("Disconnecting...", 2);
-    mihomoSidecar_.StopAsync([this] {
-        SetStatusText("Not connected", 2);
-    });
+    mihomoSidecar_.RequestStop();
 }
 
 void MainFrame::OnClose(wxCloseEvent& event)
@@ -877,9 +881,7 @@ void MainFrame::OnClose(wxCloseEvent& event)
         return;
     }
 
-    mihomoSidecar_.StopAsync([this] {
-        Destroy();
-    });
+    mihomoSidecar_.RequestStop();
 }
 
 void MainFrame::OnBrowseCore(wxCommandEvent&)

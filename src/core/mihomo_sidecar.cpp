@@ -80,11 +80,6 @@ bool MihomoSidecar::Start(const std::string& corePath,
 {
     if (IsRunning())
         return true;
-    if (stopping_)
-    {
-        error = "mihomo sidecar is still stopping";
-        return false;
-    }
 
     const auto core = ToWx(corePath);
     if (corePath.empty() || !wxFileName::FileExists(core))
@@ -132,25 +127,15 @@ bool MihomoSidecar::Start(const std::string& corePath,
 
     error = "mihomo sidecar did not become ready";
     std::cerr << "[WxClash] " << error << std::endl;
-    StopAsync({});
+    RequestStop();
     return false;
 }
 
-void MihomoSidecar::StopAsync(std::function<void()> onStopped)
+void MihomoSidecar::RequestStop()
 {
     if (pid_ <= 0)
-    {
-        if (onStopped)
-            onStopped();
-        return;
-    }
-
-    if (onStopped)
-        stopCallbacks_.push_back(std::move(onStopped));
-    if (stopping_)
         return;
 
-    stopping_ = true;
     PollOutput();
 
     const auto pid = pid_;
@@ -169,12 +154,8 @@ void MihomoSidecar::OnProcessTerminated(long pid, int)
     FlushPendingOutput();
     process_ = nullptr;
     pid_ = -1;
-    auto callbacks = std::move(stopCallbacks_);
-    stopCallbacks_.clear();
-    stopping_ = false;
-    for (auto& callback : callbacks)
-        if (callback)
-            callback();
+    if (terminationCallback_)
+        terminationCallback_();
 }
 
 void MihomoSidecar::DrainStream(wxInputStream* stream, std::string& pending,

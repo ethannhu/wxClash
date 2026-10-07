@@ -612,7 +612,10 @@ void MainFrame::RefreshCoreData()
 void MainFrame::RefreshProxies()
 {
     if (!apiConnected_)
+    {
+        AppendLog("[warning] Proxy refresh skipped: API is not connected\n");
         return;
+    }
     const auto response = apiClient_.GetProxies();
     if (!response.ok)
     {
@@ -640,9 +643,16 @@ void MainFrame::RefreshProxies()
     proxyGroupMembers_.clear();
     proxyCurrentSelection_.clear();
     const auto proxies = root.find("proxies");
+    if (proxies == root.end() || !proxies->is_object())
+    {
+        AppendLog("[error] Invalid /proxies JSON: missing object field 'proxies'\n");
+        return;
+    }
     if (proxyGroups_)
         proxyGroups_->Clear();
-    if (proxies != root.end() && proxies->is_object())
+    if (proxies->empty())
+        AppendLog("[warning] Proxy refresh returned no proxy entries\n");
+    else
     {
         for (const auto& entry : proxies->items())
         {
@@ -701,18 +711,24 @@ void MainFrame::OnProxyGroupSelected(wxCommandEvent& event)
 void MainFrame::PopulateProxyTable()
 {
     if (!proxyTable_)
+    {
+        AppendLog("[error] Proxy refresh failed: proxy table is unavailable\n");
         return;
+    }
     updatingProxyTable_ = true;
     proxyTable_->DeleteAllItems();
     const auto proxies = proxyData_.find("proxies");
     if (proxies == proxyData_.end() || !proxies->is_object())
     {
+        AppendLog("[error] Proxy refresh failed: cached response has no proxy object\n");
         updatingProxyTable_ = false;
         return;
     }
     const auto members = proxyGroupMembers_.find(selectedProxyGroup_);
     if (members == proxyGroupMembers_.end())
     {
+        AppendLog("[warning] Proxy group has no member list: " +
+                  wxString::FromUTF8(selectedProxyGroup_) + "\n");
         updatingProxyTable_ = false;
         return;
     }
@@ -775,9 +791,15 @@ void MainFrame::OnProxySelected(wxDataViewEvent& event)
 void MainFrame::SelectProxy(const std::string& proxyName)
 {
     if (!proxyTable_ || selectedProxyGroup_.empty())
+    {
+        AppendLog("[error] Proxy selection failed: no proxy group is selected\n");
         return;
+    }
     if (proxyName.empty())
+    {
+        AppendLog("[error] Proxy selection failed: selected proxy name is empty\n");
         return;
+    }
     const auto response = apiClient_.SelectProxy(selectedProxyGroup_, proxyName);
     if (!response.ok)
     {

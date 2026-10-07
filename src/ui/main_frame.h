@@ -42,6 +42,7 @@ private:
         PageConnections,
         PageLogs,
         PageSettings,
+        PageMihomo,
         PageCount
     };
 
@@ -71,6 +72,10 @@ private:
 
     wxSimplebook* book_ = nullptr;
     wxTextCtrl* logText_ = nullptr;
+    wxStaticText* overviewStatus_ = nullptr;
+    wxStaticText* overviewVersion_ = nullptr;
+    wxStaticText* overviewConnections_ = nullptr;
+    wxStaticText* overviewTraffic_ = nullptr;
     wxRadioBox* proxyGroups_ = nullptr;
     wxPanel* proxyGroupsPane_ = nullptr;
     wxPanel* proxyChoicesPane_ = nullptr;

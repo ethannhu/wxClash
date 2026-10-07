@@ -11,7 +11,6 @@
 #include <wx/ffile.h>
 #include <wx/dataview.h>
 #include <wx/msgdlg.h>
-#include <wx/notebook.h>
 #include <wx/panel.h>
 #include <wx/filename.h>
 #include <wx/radiobox.h>
@@ -197,9 +196,14 @@ MainFrame::MainFrame()
             Destroy();
         else
         {
-            SetStatusText("Not connected", 0);
-            SetStatusText("", 1);
-            SetStatusText("", 2);
+            if (overviewStatus_)
+                overviewStatus_->SetLabel("Not connected");
+            if (overviewVersion_)
+                overviewVersion_->SetLabel("Mihomo version: -");
+            if (overviewConnections_)
+                overviewConnections_->SetLabel("Connections: -");
+            if (overviewTraffic_)
+                overviewTraffic_->SetLabel("Traffic: -");
         }
     });
 
@@ -211,12 +215,6 @@ MainFrame::MainFrame()
     rootSizer->Add(contentSizer, 1, wxEXPAND | wxLEFT | wxRIGHT, kPadding);
 
     BuildPages();
-    CreateStatusBar(3);
-    int statusWidths[] = {-2, -2, -1};
-    SetStatusWidths(3, statusWidths);
-    SetStatusText("Not connected", 0);
-    SetStatusText("", 1);
-    SetStatusText("Not connected", 2);
     SetSizer(rootSizer);
     Centre();
 }
@@ -238,6 +236,7 @@ void MainFrame::BuildNavigation(wxSizer *parentSizer)
     AddNavigationButton(panel, sizer, "Connections", PageConnections);
     AddNavigationButton(panel, sizer, "Logs", PageLogs);
     AddNavigationButton(panel, sizer, "Settings", PageSettings);
+    AddNavigationButton(panel, sizer, "Mihomo", PageMihomo);
     sizer->AddStretchSpacer(1);
     panel->SetSizer(sizer);
     parentSizer->Add(panel, 0, wxEXPAND);
@@ -255,6 +254,22 @@ void MainFrame::BuildPages()
 {
     auto *overview = AddPage(book_, "Overview");
     auto *overviewSizer = overview->GetSizer();
+
+    auto *overviewInfo = new wxFlexGridSizer(2, kSpacing, kSpacing);
+    overviewStatus_ = new wxStaticText(overview, wxID_ANY, "Not connected");
+    overviewVersion_ = new wxStaticText(overview, wxID_ANY, "Mihomo version: -");
+    overviewConnections_ = new wxStaticText(overview, wxID_ANY, "Connections: -");
+    overviewTraffic_ = new wxStaticText(overview, wxID_ANY, "Traffic: -");
+    overviewInfo->Add(new wxStaticText(overview, wxID_ANY, "Status"));
+    overviewInfo->Add(overviewStatus_, 1, wxEXPAND);
+    overviewInfo->Add(new wxStaticText(overview, wxID_ANY, "Version"));
+    overviewInfo->Add(overviewVersion_, 1, wxEXPAND);
+    overviewInfo->Add(new wxStaticText(overview, wxID_ANY, "Connections"));
+    overviewInfo->Add(overviewConnections_, 1, wxEXPAND);
+    overviewInfo->Add(new wxStaticText(overview, wxID_ANY, "Traffic"));
+    overviewInfo->Add(overviewTraffic_, 1, wxEXPAND);
+    overviewInfo->AddGrowableCol(1, 1);
+    overviewSizer->Add(overviewInfo, 0, wxEXPAND | wxBOTTOM, kSpacing * 2);
 
     auto *shortcuts = new wxBoxSizer(wxHORIZONTAL);
     shortcuts->Add(new wxButton(overview, wxID_HIGHEST + 4, "Connect API"), 0,
@@ -317,8 +332,7 @@ void MainFrame::BuildPages()
 
     auto *settings = AddPage(book_, "Settings");
     auto *settingsSizer = settings->GetSizer();
-    auto *notebook = new wxNotebook(settings, wxID_ANY);
-    auto *connectionPage = new wxPanel(notebook);
+    auto *connectionPage = settings;
     auto *connectionForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
     connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "Mihomo core"));
     auto *corePathSizer = new wxBoxSizer(wxHORIZONTAL);
@@ -351,11 +365,10 @@ void MainFrame::BuildPages()
                          0, wxEXPAND);
     connectionForm->Add(configPathSizer, 1, wxEXPAND);
     connectionForm->AddGrowableCol(1, 1);
-    connectionPage->SetSizer(connectionForm);
-    notebook->AddPage(connectionPage, "Connection");
+    settingsSizer->Add(connectionForm, 0, wxEXPAND | wxBOTTOM, kSpacing * 2);
 
-    auto *mihomoPage = new wxPanel(notebook);
-    auto *mihomoPageSizer = new wxBoxSizer(wxVERTICAL);
+    auto *mihomoPage = AddPage(book_, "Mihomo");
+    auto *mihomoPageSizer = mihomoPage->GetSizer();
     auto *mihomoForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
     mihomoModeChoice_ = new wxChoice(mihomoPage, wxID_ANY);
     mihomoModeChoice_->Append("Rule");
@@ -432,21 +445,17 @@ void MainFrame::BuildPages()
                        0);
     mihomoPageSizer->Add(configActions, 0, wxEXPAND | wxTOP, kSpacing);
     mihomoPage->SetSizer(mihomoPageSizer);
-    notebook->AddPage(mihomoPage, "Mihomo");
-
-    auto *displayPage = new wxPanel(notebook);
     auto *displayForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
-    logLengthChoice_ = new wxChoice(displayPage, wxID_ANY);
+    logLengthChoice_ = new wxChoice(settings, wxID_ANY);
     logLengthChoice_->Append("10,000 characters");
     logLengthChoice_->Append("50,000 characters");
     logLengthChoice_->Append("100,000 characters");
     logLengthChoice_->Append("500,000 characters");
     logLengthChoice_->Append("1,000,000 characters");
-    displayForm->Add(new wxStaticText(displayPage, wxID_ANY, "Maximum log length"));
+    displayForm->Add(new wxStaticText(settings, wxID_ANY, "Maximum log length"));
     displayForm->Add(logLengthChoice_, 1, wxEXPAND);
     displayForm->AddGrowableCol(1, 1);
-    displayPage->SetSizer(displayForm);
-    notebook->AddPage(displayPage, "Display");
+    settingsSizer->Add(displayForm, 0, wxEXPAND);
 
     UpdateMihomoControls();
     const std::size_t logLengthValues[] = {10000, 50000, 100000, 500000, 1000000};
@@ -455,7 +464,6 @@ void MainFrame::BuildPages()
             logLengthChoice_->SetSelection(index);
     if (logLengthChoice_->GetSelection() == wxNOT_FOUND)
         logLengthChoice_->SetSelection(2);
-    settingsSizer->Add(notebook, 1, wxEXPAND);
 
     if (!corePath_.empty())
         corePathText_->SetValue(wxString::FromUTF8(corePath_));
@@ -536,7 +544,9 @@ void MainFrame::RefreshCoreData()
                                               connections->is_array()
                                           ? connections->size()
                                           : 0;
-        SetStatusText(wxString::Format("Connections: %zu", connectionCount), 1);
+        if (overviewConnections_)
+            overviewConnections_->SetLabel(
+                wxString::Format("Connections: %zu", connectionCount));
 
         if (connectionTable_)
         {
@@ -593,12 +603,13 @@ void MainFrame::RefreshCoreData()
                 AppendLog("[error] Invalid /traffic JSON: expected an object\n");
                 return;
             }
-            SetStatusText("Download: " +
-                              wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "down"))) +
-                              "/s  Upload: " +
-                              wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "up"))) +
-                              "/s",
-                          2);
+            if (overviewTraffic_)
+                overviewTraffic_->SetLabel(
+                    "Download: " +
+                    wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "down"))) +
+                    "/s  Upload: " +
+                    wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "up"))) +
+                    "/s");
         }
         catch (const Json::parse_error& exception)
         {
@@ -945,13 +956,16 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
         AppendLog("[error] API error: " + wxString::FromUTF8(response.error) + "\n");
         return;
     }
-    SetStatusText("API connected", 0);
+    if (overviewStatus_)
+        overviewStatus_->SetLabel("API connected");
     try
     {
         const auto versionRoot = Json::parse(response.body);
         const auto version = versionRoot.find("version");
         if (version != versionRoot.end() && version->is_string())
-            SetStatusText("Mihomo " + wxString::FromUTF8(version->get<std::string>()), 0);
+            if (overviewVersion_)
+                overviewVersion_->SetLabel(
+                    "Mihomo version: " + wxString::FromUTF8(version->get<std::string>()));
     }
     catch (const Json::parse_error&)
     {
@@ -967,13 +981,19 @@ void MainFrame::OnDisconnectApi(wxCommandEvent&)
     apiConnected_ = false;
     if (!mihomoSidecar_.IsRunning())
     {
-        SetStatusText("Not connected", 0);
-        SetStatusText("", 1);
-        SetStatusText("", 2);
+        if (overviewStatus_)
+            overviewStatus_->SetLabel("Not connected");
+        if (overviewVersion_)
+            overviewVersion_->SetLabel("Mihomo version: -");
+        if (overviewConnections_)
+            overviewConnections_->SetLabel("Connections: -");
+        if (overviewTraffic_)
+            overviewTraffic_->SetLabel("Traffic: -");
         return;
     }
 
-    SetStatusText("Disconnecting...", 0);
+    if (overviewStatus_)
+        overviewStatus_->SetLabel("Disconnecting...");
     mihomoSidecar_.RequestStop();
 }
 
@@ -1044,7 +1064,8 @@ void MainFrame::OnBrowseConfig(wxCommandEvent&)
         configPathText_->SetValue(dialog.GetPath());
     UpdateMihomoControls();
     SaveSettings(corePath_, dataPath_, configPath_, maxLogLength_);
-    SetStatusText("Config imported: " + dialog.GetFilename(), 2);
+    if (overviewStatus_)
+        overviewStatus_->SetLabel("Config imported: " + dialog.GetFilename());
 }
 
 void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
@@ -1114,7 +1135,8 @@ void MainFrame::OnSaveMihomoConfig(wxCommandEvent&)
         configPathText_->SetValue(dialog.GetPath());
     SaveSettings(corePath_, dataPath_, configPath_, maxLogLength_);
     std::cerr << "[WxClash] Saved mihomo config: " << path << std::endl;
-    SetStatusText("Mihomo config saved", 2);
+    if (overviewStatus_)
+        overviewStatus_->SetLabel("Mihomo config saved");
 }
 
 void MainFrame::UpdateMihomoControls()

@@ -24,7 +24,6 @@ class wxRadioButton;
 class wxPanel;
 class wxScrolledWindow;
 class wxSizer;
-class wxSplitterWindow;
 class wxStaticText;
 class wxTextCtrl;
 class wxWindow;
@@ -84,7 +83,6 @@ private:
     wxPanel* proxyChoicesPane_ = nullptr;
     wxScrolledWindow* proxyChoicesScroll_ = nullptr;
     std::vector<wxRadioButton*> proxyChoiceButtons_;
-    wxSplitterWindow* proxySplitter_ = nullptr;
     wxDataViewListCtrl* connectionTable_ = nullptr;
     wxTextCtrl* corePathText_ = nullptr;
     wxTextCtrl* dataPathText_ = nullptr;

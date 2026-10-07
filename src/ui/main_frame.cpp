@@ -19,7 +19,6 @@
 #include <wx/srchctrl.h>
 #include <wx/simplebook.h>
 #include <wx/sizer.h>
-#include <wx/splitter.h>
 #include <wx/statbox.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
@@ -147,7 +146,7 @@ namespace
         auto *sizer = new wxBoxSizer(wxVERTICAL);
         auto *heading = new wxStaticText(page, wxID_ANY, title);
         heading->SetFont(heading->GetFont().Bold().Scale(1.35));
-        sizer->Add(heading, 0, wxBOTTOM, kSpacing * 2);
+        sizer->Add(heading, 0, wxALL, kSpacing);
         page->SetSizer(sizer);
         book->AddPage(page, title);
         return page;
@@ -253,7 +252,7 @@ void MainFrame::AddNavigationButton(wxWindow* parent, wxSizer* sizer,
 {
     auto* button = new wxButton(parent, static_cast<int>(page), label);
     button->SetMinSize(wxSize(kNavigationWidth, 36));
-    sizer->Add(button, 0, wxEXPAND | wxBOTTOM, 4);
+    sizer->Add(button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, kSpacing);
 }
 
 void MainFrame::BuildPages()
@@ -275,23 +274,19 @@ void MainFrame::BuildPages()
     overviewInfo->Add(new wxStaticText(overview, wxID_ANY, "Traffic"));
     overviewInfo->Add(overviewTraffic_, 1, wxEXPAND);
     overviewInfo->AddGrowableCol(1, 1);
-    overviewSizer->Add(overviewInfo, 0, wxEXPAND | wxBOTTOM, kSpacing * 2);
+    overviewSizer->Add(overviewInfo, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
+                       kSpacing);
 
     auto *shortcuts = new wxBoxSizer(wxHORIZONTAL);
     shortcuts->Add(new wxButton(overview, wxID_HIGHEST + 4, "Connect API"), 0,
                    wxRIGHT, kSpacing);
     shortcuts->Add(new wxButton(overview, wxID_HIGHEST + 11, "Disconnect"), 0);
-    overviewSizer->Add(shortcuts, 0);
+    overviewSizer->Add(shortcuts, 0, wxLEFT | wxRIGHT | wxBOTTOM, kSpacing);
 
     auto *proxies = AddPage(book_, "Proxies");
     auto *proxySizer = proxies->GetSizer();
-    proxySplitter_ = new wxSplitterWindow(proxies, wxID_ANY, wxDefaultPosition,
-                                          wxDefaultSize,
-                                          wxSP_LIVE_UPDATE | wxSP_3D);
-    proxySplitter_->SetMinimumPaneSize(160);
-    proxySplitter_->SetSashGravity(0.22);
-    proxyGroupsPane_ = new wxPanel(proxySplitter_);
-    proxyChoicesPane_ = new wxPanel(proxySplitter_);
+    proxyGroupsPane_ = new wxPanel(proxies);
+    proxyChoicesPane_ = new wxPanel(proxies);
     proxyGroups_ = new wxRadioBox(proxyGroupsPane_, wxID_HIGHEST + 12,
                                   "Groups", wxDefaultPosition, wxDefaultSize,
                                   wxArrayString{"No groups"}, 1,
@@ -310,22 +305,24 @@ void MainFrame::BuildPages()
     proxyChoicesScroll_->SetSizer(choiceScrollSizer);
     choicePaneSizer->Add(proxyChoicesScroll_, 1, wxEXPAND);
     proxyChoicesPane_->SetSizer(choicePaneSizer);
-    proxySplitter_->SplitVertically(proxyGroupsPane_, proxyChoicesPane_, 240);
-    proxySizer->Add(new wxSearchCtrl(proxies, wxID_ANY), 0,
-                    wxEXPAND | wxBOTTOM, kSpacing);
-    proxySizer->Add(proxySplitter_, 1, wxEXPAND);
+    auto *proxyColumns = new wxBoxSizer(wxHORIZONTAL);
+    proxyColumns->Add(proxyGroupsPane_, 1, wxEXPAND | wxRIGHT, kSpacing);
+    proxyColumns->Add(proxyChoicesPane_, 2, wxEXPAND);
+    proxySizer->Add(proxyColumns, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
+                    kSpacing);
 
     auto *connections = AddPage(book_, "Connections");
     auto *connectionSizer = connections->GetSizer();
     connectionSizer->Add(new wxSearchCtrl(connections, wxID_ANY), 0,
-                         wxEXPAND | wxBOTTOM, kSpacing);
+                         wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, kSpacing);
     connectionTable_ = new wxDataViewListCtrl(connections, wxID_ANY);
     AddTableColumn(connectionTable_, "Target", 220);
     AddTableColumn(connectionTable_, "Process", 160);
     AddTableColumn(connectionTable_, "Network", 80);
     AddTableColumn(connectionTable_, "Rule", 150);
     AddTableColumn(connectionTable_, "Proxy chain", 180);
-    connectionSizer->Add(connectionTable_, 1, wxEXPAND);
+    connectionSizer->Add(connectionTable_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
+                         kSpacing);
 
     auto *logs = AddPage(book_, "Logs");
     auto *logSizer = logs->GetSizer();
@@ -334,7 +331,7 @@ void MainFrame::BuildPages()
                                    wxDefaultPosition, wxDefaultSize,
                                    wxTE_MULTILINE | wxTE_READONLY | wxTE_RICH2);
     logText_ = logText;
-    logSizer->Add(logText_, 1, wxEXPAND);
+    logSizer->Add(logText_, 1, wxEXPAND | wxALL, kSpacing);
 
     auto *settings = AddPage(book_, "Settings");
     auto *settingsSizer = settings->GetSizer();
@@ -371,7 +368,7 @@ void MainFrame::BuildPages()
                          0, wxEXPAND);
     connectionForm->Add(configPathSizer, 1, wxEXPAND);
     connectionForm->AddGrowableCol(1, 1);
-    settingsSizer->Add(connectionForm, 0, wxEXPAND | wxBOTTOM, kSpacing * 2);
+    settingsSizer->Add(connectionForm, 0, wxEXPAND | wxALL, kSpacing);
 
     auto *mihomoPage = AddPage(book_, "Mihomo");
     auto *mihomoPageSizer = mihomoPage->GetSizer();
@@ -441,7 +438,7 @@ void MainFrame::BuildPages()
     mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "DNS nameservers"));
     mihomoForm->Add(nameserverText_, 1, wxEXPAND);
     mihomoForm->AddGrowableCol(1, 1);
-    mihomoPageSizer->Add(mihomoForm, 1, wxEXPAND);
+    mihomoPageSizer->Add(mihomoForm, 1, wxEXPAND | wxALL, kSpacing);
 
     auto *configActions = new wxBoxSizer(wxHORIZONTAL);
     configActions->Add(new wxButton(mihomoPage, wxID_HIGHEST + 7, "Import"),
@@ -449,7 +446,8 @@ void MainFrame::BuildPages()
     configActions->AddStretchSpacer(1);
     configActions->Add(new wxButton(mihomoPage, wxID_HIGHEST + 9, "Save"),
                        0);
-    mihomoPageSizer->Add(configActions, 0, wxEXPAND | wxTOP, kSpacing);
+    mihomoPageSizer->Add(configActions, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
+                         kSpacing);
     mihomoPage->SetSizer(mihomoPageSizer);
     auto *displayForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
     logLengthChoice_ = new wxChoice(settings, wxID_ANY);
@@ -461,7 +459,7 @@ void MainFrame::BuildPages()
     displayForm->Add(new wxStaticText(settings, wxID_ANY, "Maximum log length"));
     displayForm->Add(logLengthChoice_, 1, wxEXPAND);
     displayForm->AddGrowableCol(1, 1);
-    settingsSizer->Add(displayForm, 0, wxEXPAND);
+    settingsSizer->Add(displayForm, 0, wxEXPAND | wxALL, kSpacing);
 
     UpdateMihomoControls();
     const std::size_t logLengthValues[] = {10000, 50000, 100000, 500000, 1000000};

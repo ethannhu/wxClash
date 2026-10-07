@@ -162,6 +162,8 @@ namespace
 
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_CLOSE(MainFrame::OnClose)
+    EVT_TIMER(wxID_HIGHEST + 8, MainFrame::OnSidecarOutput)
+    EVT_TIMER(wxID_HIGHEST + 10, MainFrame::OnMonitorTimer)
     EVT_BUTTON(wxID_HIGHEST + 4, MainFrame::OnConnectApi)
     EVT_BUTTON(wxID_HIGHEST + 11, MainFrame::OnDisconnectApi)
     EVT_RADIOBOX(wxID_HIGHEST + 12, MainFrame::OnProxyGroupSelected)
@@ -176,7 +178,9 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
 
 MainFrame::MainFrame()
     : wxFrame(nullptr, wxID_ANY, "WxClash", wxDefaultPosition, wxSize(1100, 700),
-      wxDEFAULT_FRAME_STYLE)
+      wxDEFAULT_FRAME_STYLE),
+      sidecarOutputTimer_(this, wxID_HIGHEST + 8),
+      monitorTimer_(this, wxID_HIGHEST + 10)
 {
     LoadSettings(corePath_, dataPath_, configPath_, maxLogLength_);
     if (dataPath_.empty())
@@ -221,6 +225,8 @@ MainFrame::MainFrame()
 
 MainFrame::~MainFrame()
 {
+    sidecarOutputTimer_.Stop();
+    monitorTimer_.Stop();
     if (configPathText_)
         configPath_ = configPathText_->GetValue().ToStdString();
     SaveSettings(corePath_, dataPath_, configPath_, maxLogLength_);
@@ -479,9 +485,7 @@ void MainFrame::OnNavigation(wxCommandEvent &event)
     if (page >= 0 && page < PageCount)
     {
         book_->SetSelection(page);
-        if (page == PageOverview || page == PageConnections)
-            RefreshCoreData();
-        else if (page == PageProxies)
+        if (page == PageProxies)
             RefreshProxies();
     }
 }
@@ -497,6 +501,21 @@ void MainFrame::OnModeChanged(wxCommandEvent &event)
                                    maxLogLength_));
         return;
     }
+}
+
+void MainFrame::OnSidecarOutput(wxTimerEvent&)
+{
+    if (mihomoSidecar_.IsRunning())
+        mihomoSidecar_.PollOutput();
+}
+
+void MainFrame::OnMonitorTimer(wxTimerEvent&)
+{
+    if (!apiConnected_)
+        return;
+    const auto page = book_ ? book_->GetSelection() : wxNOT_FOUND;
+    if (page == PageOverview || page == PageConnections)
+        RefreshCoreData();
 }
 
 void MainFrame::AppendLog(const wxString& message)
@@ -973,12 +992,15 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
         // version payload cannot be decoded.
     }
     apiConnected_ = true;
-    RefreshCoreData();
+    sidecarOutputTimer_.Start(200);
+    monitorTimer_.Start(2000);
 }
 
 void MainFrame::OnDisconnectApi(wxCommandEvent&)
 {
     apiConnected_ = false;
+    sidecarOutputTimer_.Stop();
+    monitorTimer_.Stop();
     if (!mihomoSidecar_.IsRunning())
     {
         if (overviewStatus_)
@@ -1005,6 +1027,8 @@ void MainFrame::OnClose(wxCloseEvent& event)
 
     closing_ = true;
     apiConnected_ = false;
+    sidecarOutputTimer_.Stop();
+    monitorTimer_.Stop();
 
     if (!mihomoSidecar_.IsRunning())
     {

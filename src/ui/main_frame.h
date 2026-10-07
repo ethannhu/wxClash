@@ -1,6 +1,7 @@
 #pragma once
 
 #include <wx/frame.h>
+#include <wx/timer.h>
 
 #include <nlohmann/json.hpp>
 
@@ -56,6 +57,8 @@ private:
     void OnConnectApi(wxCommandEvent& event);
     void OnDisconnectApi(wxCommandEvent& event);
     void OnClose(wxCloseEvent& event);
+    void OnSidecarOutput(wxTimerEvent& event);
+    void OnMonitorTimer(wxTimerEvent& event);
     void OnProxyGroupSelected(wxCommandEvent& event);
     void OnProxySelected(wxCommandEvent& event);
     void OnBrowseCore(wxCommandEvent& event);
@@ -107,6 +110,8 @@ private:
     MihomoConfig mihomoConfig_;
     MihomoApiClient apiClient_;
     MihomoSidecar mihomoSidecar_;
+    wxTimer sidecarOutputTimer_;
+    wxTimer monitorTimer_;
     bool apiConnected_ = false;
     bool closing_ = false;
     std::size_t maxLogLength_ = 100000;

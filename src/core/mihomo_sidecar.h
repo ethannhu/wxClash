@@ -29,6 +29,7 @@ public:
                wxEvtHandler* processParent,
                std::string& error);
     void RequestStop();
+    void PollOutput();
     void SetOutputCallback(std::function<void(const std::string&)> callback)
     {
         outputCallback_ = std::move(callback);
@@ -43,7 +44,6 @@ private:
     friend class MihomoSidecarProcess;
 
     void OnProcessTerminated(long pid, int status);
-    void PollOutput();
     void DrainStream(wxInputStream* stream, std::string& pending,
                      const char* label, bool mirrorToConsole);
     void FlushPendingOutput();

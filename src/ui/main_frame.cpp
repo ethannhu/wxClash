@@ -220,10 +220,16 @@ MainFrame::MainFrame()
         AppendLog(wxString::FromUTF8(message) + "\n");
     });
     mihomoSidecar_.SetTerminationCallback([this] {
+        sidecarOutputTimer_.Stop();
+        monitorTimer_.Stop();
         if (closing_)
             Destroy();
         else
             SetStatusText("Not connected", 2);
+    });
+    mihomoSidecar_.SetStartCallback([this] {
+        sidecarOutputTimer_.Start(pollingIntervalMs_);
+        monitorTimer_.Start(pollingIntervalMs_);
     });
     ApplyPollingSettings();
 
@@ -247,8 +253,6 @@ MainFrame::MainFrame()
 
 MainFrame::~MainFrame()
 {
-    sidecarOutputTimer_.Stop();
-    monitorTimer_.Stop();
     if (configPathText_)
         configPath_ = configPathText_->GetValue().ToStdString();
     SaveSettings(corePath_, dataPath_, configPath_, pollingIntervalMs_, maxLogLength_);
@@ -556,13 +560,16 @@ void MainFrame::AppendLog(const wxString& message)
 
 void MainFrame::ApplyPollingSettings()
 {
-    sidecarOutputTimer_.Start(pollingIntervalMs_);
-    if (apiConnected_)
+    if (sidecarOutputTimer_.IsRunning())
+        sidecarOutputTimer_.Start(pollingIntervalMs_);
+    if (monitorTimer_.IsRunning())
         monitorTimer_.Start(pollingIntervalMs_);
 }
 
 void MainFrame::OnMonitorTimer(wxTimerEvent&)
 {
+    if (!apiConnected_)
+        return;
     RefreshCoreData();
 }
 
@@ -828,6 +835,7 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
     {
         std::cerr << "[WxClash] API error: " << response.error << std::endl;
         apiConnected_ = false;
+        mihomoSidecar_.RequestStop();
         SetStatusText("API error: " + wxString::FromUTF8(response.error), 2);
         return;
     }
@@ -845,14 +853,11 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
     }
     apiConnected_ = true;
     RefreshCoreData();
-    ApplyPollingSettings();
     SetStatusText("API connected", 2);
 }
 
 void MainFrame::OnDisconnectApi(wxCommandEvent&)
 {
-    monitorTimer_.Stop();
-    sidecarOutputTimer_.Stop();
     apiConnected_ = false;
     if (!mihomoSidecar_.IsRunning())
     {
@@ -871,8 +876,6 @@ void MainFrame::OnClose(wxCloseEvent& event)
         return;
 
     closing_ = true;
-    sidecarOutputTimer_.Stop();
-    monitorTimer_.Stop();
     apiConnected_ = false;
 
     if (!mihomoSidecar_.IsRunning())

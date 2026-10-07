@@ -38,6 +38,10 @@ public:
     {
         terminationCallback_ = std::move(callback);
     }
+    void SetStartCallback(std::function<void()> callback)
+    {
+        startCallback_ = std::move(callback);
+    }
     bool IsRunning() const { return pid_ > 0; }
 
 private:
@@ -52,6 +56,7 @@ private:
     MihomoSidecarProcess* process_ = nullptr;
     std::function<void(const std::string&)> outputCallback_;
     std::function<void()> terminationCallback_;
+    std::function<void()> startCallback_;
     std::string stdoutPending_;
     std::string stderrPending_;
 };

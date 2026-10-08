@@ -61,7 +61,6 @@ private:
     void OnProxyGroupSelected(wxCommandEvent& event);
     void OnProxySelected(wxCommandEvent& event);
     void OnBrowseCore(wxCommandEvent& event);
-    void OnBrowseDataPath(wxCommandEvent& event);
     void OnBrowseConfig(wxCommandEvent& event);
     bool SaveMihomoSettings(std::string& error);
     bool PrepareRuntimeConfig(std::string& runtimePath, std::string& error);
@@ -86,7 +85,6 @@ private:
     std::vector<wxRadioButton*> proxyChoiceButtons_;
     wxDataViewListCtrl* connectionTable_ = nullptr;
     wxTextCtrl* corePathText_ = nullptr;
-    wxTextCtrl* dataPathText_ = nullptr;
     wxTextCtrl* configPathText_ = nullptr;
     wxChoice* mihomoModeChoice_ = nullptr;
     wxChoice* mihomoLogLevelChoice_ = nullptr;

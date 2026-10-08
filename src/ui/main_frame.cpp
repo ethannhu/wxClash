@@ -5,8 +5,6 @@
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
-#include <wx/dir.h>
-#include <wx/dirdlg.h>
 #include <wx/filedlg.h>
 #include <wx/ffile.h>
 #include <wx/dataview.h>
@@ -100,8 +98,8 @@ namespace
             .GetFullPath().ToStdString();
     }
 
-    void LoadSettings(std::string& corePath, std::string& dataPath,
-                      std::string& configPath, std::size_t& maxLogLength)
+    void LoadSettings(std::string& corePath, std::string& configPath,
+                      std::size_t& maxLogLength)
     {
         wxFFile file(SettingsPath(), "r");
         if (!file.IsOpened())
@@ -117,8 +115,6 @@ namespace
             const auto line = lines.GetNextToken();
             if (line.StartsWith("core_path="))
                 corePath = line.Mid(10).ToStdString();
-            else if (line.StartsWith("data_path="))
-                dataPath = line.Mid(10).ToStdString();
             else if (line.StartsWith("config_path="))
                 configPath = line.Mid(12).ToStdString();
             else if (line.StartsWith("max_log_length="))
@@ -132,8 +128,8 @@ namespace
         }
     }
 
-    void SaveSettings(const std::string& corePath, const std::string& dataPath,
-                      const std::string& configPath, std::size_t maxLogLength)
+    void SaveSettings(const std::string& corePath, const std::string& configPath,
+                      std::size_t maxLogLength)
     {
         wxFFile file(SettingsPath(), "w");
         if (!file.IsOpened())
@@ -144,7 +140,6 @@ namespace
         }
 
         const wxString contents = "core_path=" + wxString::FromUTF8(corePath) +
-                                  "\ndata_path=" + wxString::FromUTF8(dataPath) +
                                   "\nconfig_path=" + wxString::FromUTF8(configPath) +
                                   "\nmax_log_length=" + wxString::Format("%zu", maxLogLength) +
                                   "\n";
@@ -180,7 +175,6 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_RADIOBOX(wxID_HIGHEST + 12, MainFrame::OnProxyGroupSelected)
     EVT_RADIOBUTTON(wxID_HIGHEST + 13, MainFrame::OnProxySelected)
     EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
-    EVT_BUTTON(wxID_HIGHEST + 6, MainFrame::OnBrowseDataPath)
     EVT_BUTTON(wxID_HIGHEST + 7, MainFrame::OnBrowseConfig)
     EVT_BUTTON(wxID_ANY, MainFrame::OnNavigation)
         EVT_CHOICE(wxID_ANY, MainFrame::OnModeChanged)
@@ -192,9 +186,8 @@ MainFrame::MainFrame()
       sidecarOutputTimer_(this, wxID_HIGHEST + 8),
       monitorTimer_(this, wxID_HIGHEST + 10)
 {
-    LoadSettings(corePath_, dataPath_, configPath_, maxLogLength_);
-    if (dataPath_.empty())
-        dataPath_ = MihomoSidecar::DefaultDataPath();
+    LoadSettings(corePath_, configPath_, maxLogLength_);
+    dataPath_ = MihomoSidecar::DefaultDataPath();
     if (configPath_.empty())
         configPath_ = wxFileName(wxString::FromUTF8(dataPath_), "config.yaml")
                           .GetFullPath().ToStdString();
@@ -246,7 +239,7 @@ MainFrame::~MainFrame()
     }
     if (configPathText_)
         configPath_ = configPathText_->GetValue().ToStdString();
-    SaveSettings(corePath_, dataPath_, configPath_, maxLogLength_);
+    SaveSettings(corePath_, configPath_, maxLogLength_);
 }
 
 void MainFrame::BuildNavigation(wxSizer *parentSizer)
@@ -365,16 +358,6 @@ void MainFrame::BuildPages()
     corePathSizer->Add(new wxButton(connectionPage, wxID_HIGHEST + 5, "Browse..."),
                        0, wxEXPAND);
     connectionForm->Add(corePathSizer, 1, wxEXPAND);
-    connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "App data directory"));
-    auto *dataPathSizer = new wxBoxSizer(wxHORIZONTAL);
-    dataPathText_ = new wxTextCtrl(connectionPage, wxID_ANY,
-                                    wxString::FromUTF8(dataPath_),
-                                    wxDefaultPosition, wxDefaultSize,
-                                    wxTE_PROCESS_ENTER);
-    dataPathSizer->Add(dataPathText_, 1, wxEXPAND | wxRIGHT, kSpacing);
-    dataPathSizer->Add(new wxButton(connectionPage, wxID_HIGHEST + 6, "Browse..."),
-                        0, wxEXPAND);
-    connectionForm->Add(dataPathSizer, 1, wxEXPAND);
     connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "Mihomo config"));
     auto *configPathSizer = new wxBoxSizer(wxHORIZONTAL);
     configPathText_ = new wxTextCtrl(connectionPage, wxID_ANY,
@@ -939,7 +922,6 @@ void MainFrame::SelectProxy(const std::string& proxyName)
 void MainFrame::OnConnectApi(wxCommandEvent&)
 {
     corePath_ = corePathText_ ? corePathText_->GetValue().ToStdString() : std::string{};
-    dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : std::string{};
     configPath_ = configPathText_ ? configPathText_->GetValue().ToStdString() : configPath_;
 
     std::string runtimeConfigPath;
@@ -1070,27 +1052,6 @@ void MainFrame::OnBrowseCore(wxCommandEvent&)
     }
 }
 
-void MainFrame::OnBrowseDataPath(wxCommandEvent&)
-{
-    const wxString currentPath = dataPathText_ ? dataPathText_->GetValue() : wxString{};
-    wxDirDialog dialog(this, "Select WxClash data directory",
-                       currentPath,
-                       wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
-    if (dialog.ShowModal() == wxID_OK)
-    {
-        dataPath_ = dialog.GetPath().ToStdString();
-        if (dataPathText_)
-            dataPathText_->SetValue(dialog.GetPath());
-        std::string error;
-        if (!mihomoConfig_.LoadOverrides(MihomoOverridesPath(dataPath_), error))
-        {
-            AppendLog("[error] " + wxString::FromUTF8(error) + "\n");
-            return;
-        }
-        UpdateMihomoControls();
-    }
-}
-
 void MainFrame::OnBrowseConfig(wxCommandEvent&)
 {
     const wxFileName currentPath(configPathText_ ? configPathText_->GetValue()
@@ -1117,14 +1078,13 @@ void MainFrame::OnBrowseConfig(wxCommandEvent&)
     if (configPathText_)
         configPathText_->SetValue(dialog.GetPath());
     UpdateMihomoControls();
-    SaveSettings(corePath_, dataPath_, configPath_, maxLogLength_);
+    SaveSettings(corePath_, configPath_, maxLogLength_);
     if (overviewStatus_)
         overviewStatus_->SetLabel("Base config selected: " + dialog.GetFilename());
 }
 
 bool MainFrame::SaveMihomoSettings(std::string& error)
 {
-    dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : dataPath_;
     mihomoConfig_.mode = mihomoModeChoice_->GetStringSelection().ToStdString();
     mihomoConfig_.logLevel = mihomoLogLevelChoice_->GetStringSelection().ToStdString();
     mihomoConfig_.tunStack = tunStackChoice_->GetStringSelection().ToStdString();
@@ -1172,12 +1132,7 @@ bool MainFrame::SaveMihomoSettings(std::string& error)
 
 bool MainFrame::PrepareRuntimeConfig(std::string& runtimePath, std::string& error)
 {
-    dataPath_ = dataPathText_ ? dataPathText_->GetValue().ToStdString() : dataPath_;
-    if (dataPath_.empty())
-    {
-        error = "WxClash data directory is empty";
-        return false;
-    }
+    dataPath_ = MihomoSidecar::DefaultDataPath();
     if (!SaveMihomoSettings(error))
         return false;
     runtimePath = MihomoRuntimePath(dataPath_);

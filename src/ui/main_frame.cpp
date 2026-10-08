@@ -14,15 +14,11 @@
 #include <wx/radiobox.h>
 #include <wx/radiobut.h>
 #include <wx/scrolwin.h>
-#include <wx/srchctrl.h>
 #include <wx/simplebook.h>
 #include <wx/sizer.h>
-#include <wx/statbox.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 #include <wx/tokenzr.h>
-
-#include <yaml-cpp/yaml.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -147,23 +143,6 @@ namespace
             std::cerr << "[WxClash] Unable to write settings file" << std::endl;
     }
 
-    wxPanel *AddPage(wxSimplebook *book, const wxString &title)
-    {
-        auto *page = new wxPanel(book);
-        auto *sizer = new wxBoxSizer(wxVERTICAL);
-        auto *heading = new wxStaticText(page, wxID_ANY, title);
-        heading->SetFont(heading->GetFont().Bold().Scale(1.35));
-        sizer->Add(heading, 0, wxALL, kSpacing);
-        page->SetSizer(sizer);
-        book->AddPage(page, title);
-        return page;
-    }
-
-    void AddTableColumn(wxDataViewListCtrl *table, const wxString &title, int width)
-    {
-        table->AppendTextColumn(title, wxDATAVIEW_CELL_INERT, width,
-                                wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
-    }
 }
 
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
@@ -205,14 +184,10 @@ MainFrame::MainFrame()
             Destroy();
         else
         {
-            if (overviewStatus_)
-                overviewStatus_->SetLabel("Not connected");
-            if (overviewVersion_)
-                overviewVersion_->SetLabel("Mihomo version: -");
-            if (overviewConnections_)
-                overviewConnections_->SetLabel("Connections: -");
-            if (overviewTraffic_)
-                overviewTraffic_->SetLabel("Traffic: -");
+            overviewPage_->status->SetLabel("Not connected");
+            overviewPage_->version->SetLabel("Mihomo version: -");
+            overviewPage_->connections->SetLabel("Connections: -");
+            overviewPage_->traffic->SetLabel("Traffic: -");
         }
     });
 
@@ -232,13 +207,12 @@ MainFrame::~MainFrame()
 {
     sidecarOutputTimer_.Stop();
     monitorTimer_.Stop();
-    if (mihomoModeChoice_)
+    if (mihomoPage_)
     {
         std::string ignoredError;
         SaveMihomoSettings(ignoredError);
     }
-    if (configPathText_)
-        configPath_ = configPathText_->GetValue().ToStdString();
+    configPath_ = settingsPage_->configPath->GetValue().ToStdString();
     SaveSettings(corePath_, configPath_, maxLogLength_);
 }
 
@@ -268,206 +242,35 @@ void MainFrame::AddNavigationButton(wxWindow* parent, wxSizer* sizer,
 
 void MainFrame::BuildPages()
 {
-    auto *overview = AddPage(book_, "Overview");
-    auto *overviewSizer = overview->GetSizer();
+    overviewPage_ = new OverviewPage(book_);
+    proxyPage_ = new ProxyPage(book_);
+    connectionsPage_ = new ConnectionsPage(book_);
+    logsPage_ = new LogsPage(book_);
+    settingsPage_ = new SettingsPage(book_);
+    mihomoPage_ = new MihomoPage(book_);
 
-    auto *overviewInfo = new wxFlexGridSizer(2, kSpacing, kSpacing);
-    overviewStatus_ = new wxStaticText(overview, wxID_ANY, "Not connected");
-    overviewVersion_ = new wxStaticText(overview, wxID_ANY, "Mihomo version: -");
-    overviewConnections_ = new wxStaticText(overview, wxID_ANY, "Connections: -");
-    overviewTraffic_ = new wxStaticText(overview, wxID_ANY, "Traffic: -");
-    overviewInfo->Add(new wxStaticText(overview, wxID_ANY, "Status"));
-    overviewInfo->Add(overviewStatus_, 1, wxEXPAND);
-    overviewInfo->Add(new wxStaticText(overview, wxID_ANY, "Version"));
-    overviewInfo->Add(overviewVersion_, 1, wxEXPAND);
-    overviewInfo->Add(new wxStaticText(overview, wxID_ANY, "Connections"));
-    overviewInfo->Add(overviewConnections_, 1, wxEXPAND);
-    overviewInfo->Add(new wxStaticText(overview, wxID_ANY, "Traffic"));
-    overviewInfo->Add(overviewTraffic_, 1, wxEXPAND);
-    overviewInfo->AddGrowableCol(1, 1);
-    overviewSizer->Add(overviewInfo, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
-                       kSpacing);
+    book_->AddPage(overviewPage_, "Overview");
+    book_->AddPage(proxyPage_, "Proxies");
+    book_->AddPage(connectionsPage_, "Connections");
+    book_->AddPage(logsPage_, "Logs");
+    book_->AddPage(settingsPage_, "Settings");
+    book_->AddPage(mihomoPage_, "Mihomo");
 
-    auto *shortcuts = new wxBoxSizer(wxHORIZONTAL);
-    shortcuts->Add(new wxButton(overview, wxID_HIGHEST + 4, "Connect API"), 0,
-                   wxRIGHT, kSpacing);
-    shortcuts->Add(new wxButton(overview, wxID_HIGHEST + 11, "Disconnect"), 0);
-    overviewSizer->Add(shortcuts, 0, wxLEFT | wxRIGHT | wxBOTTOM, kSpacing);
-
-    auto *proxies = AddPage(book_, "Proxies");
-    auto *proxySizer = proxies->GetSizer();
-    proxyGroupsPane_ = new wxPanel(proxies);
-    proxyChoicesPane_ = new wxPanel(proxies);
-    proxyGroups_ = new wxRadioBox(proxyGroupsPane_, wxID_HIGHEST + 12,
-                                  "Groups", wxDefaultPosition, wxDefaultSize,
-                                  wxArrayString{"No groups"}, 1,
-                                  wxRA_SPECIFY_COLS);
-    auto *groupPaneSizer = new wxBoxSizer(wxVERTICAL);
-    groupPaneSizer->Add(proxyGroups_, 1, wxEXPAND);
-    proxyGroupsPane_->SetSizer(groupPaneSizer);
-    auto *choicePaneSizer = new wxBoxSizer(wxVERTICAL);
-    proxyChoicesScroll_ = new wxScrolledWindow(proxyChoicesPane_, wxID_ANY,
-                                               wxDefaultPosition, wxDefaultSize,
-                                               wxVSCROLL | wxBORDER_NONE);
-    proxyChoicesScroll_->SetScrollRate(0, 10);
-    auto *choiceScrollSizer = new wxBoxSizer(wxVERTICAL);
-    choiceScrollSizer->Add(new wxStaticText(proxyChoicesScroll_, wxID_ANY, "Proxies"),
-                            0, wxBOTTOM, kSpacing);
-    proxyChoicesScroll_->SetSizer(choiceScrollSizer);
-    choicePaneSizer->Add(proxyChoicesScroll_, 1, wxEXPAND);
-    proxyChoicesPane_->SetSizer(choicePaneSizer);
-    auto *proxyColumns = new wxBoxSizer(wxHORIZONTAL);
-    proxyColumns->Add(proxyGroupsPane_, 1, wxEXPAND | wxRIGHT, kSpacing);
-    proxyColumns->Add(proxyChoicesPane_, 2, wxEXPAND);
-    proxySizer->Add(proxyColumns, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
-                    kSpacing);
-
-    auto *connections = AddPage(book_, "Connections");
-    auto *connectionSizer = connections->GetSizer();
-    connectionSizer->Add(new wxSearchCtrl(connections, wxID_ANY), 0,
-                         wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, kSpacing);
-    connectionTable_ = new wxDataViewListCtrl(connections, wxID_ANY);
-    AddTableColumn(connectionTable_, "Target", 220);
-    AddTableColumn(connectionTable_, "Process", 160);
-    AddTableColumn(connectionTable_, "Network", 80);
-    AddTableColumn(connectionTable_, "Rule", 150);
-    AddTableColumn(connectionTable_, "Proxy chain", 180);
-    connectionSizer->Add(connectionTable_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
-                         kSpacing);
-
-    auto *logs = AddPage(book_, "Logs");
-    auto *logSizer = logs->GetSizer();
-    auto *logText = new wxTextCtrl(logs, wxID_ANY,
-                                   "[info] Log view is ready; waiting for Mihomo.\n",
-                                   wxDefaultPosition, wxDefaultSize,
-                                   wxTE_MULTILINE | wxTE_READONLY | wxTE_RICH2);
-    logText_ = logText;
-    logSizer->Add(logText_, 1, wxEXPAND | wxALL, kSpacing);
-
-    auto *settings = AddPage(book_, "Settings");
-    auto *settingsSizer = settings->GetSizer();
-    auto *connectionPage = settings;
-    auto *connectionForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
-    connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "Mihomo core"));
-    auto *corePathSizer = new wxBoxSizer(wxHORIZONTAL);
-    corePathText_ = new wxTextCtrl(connectionPage, wxID_ANY,
-                                    wxEmptyString, wxDefaultPosition,
-                                    wxDefaultSize, wxTE_PROCESS_ENTER);
-    corePathText_->SetHint("Path to mihomo executable");
-    corePathSizer->Add(corePathText_, 1, wxEXPAND | wxRIGHT, kSpacing);
-    corePathSizer->Add(new wxButton(connectionPage, wxID_HIGHEST + 5, "Browse..."),
-                       0, wxEXPAND);
-    connectionForm->Add(corePathSizer, 1, wxEXPAND);
-    connectionForm->Add(new wxStaticText(connectionPage, wxID_ANY, "Mihomo config"));
-    auto *configPathSizer = new wxBoxSizer(wxHORIZONTAL);
-    configPathText_ = new wxTextCtrl(connectionPage, wxID_ANY,
-                                     wxEmptyString, wxDefaultPosition,
-                                     wxDefaultSize, wxTE_PROCESS_ENTER);
-    configPathText_->SetHint("Path to mihomo YAML config");
-    configPathSizer->Add(configPathText_, 1, wxEXPAND | wxRIGHT, kSpacing);
-    configPathSizer->Add(new wxButton(connectionPage, wxID_HIGHEST + 7, "Browse..."),
-                         0, wxEXPAND);
-    connectionForm->Add(configPathSizer, 1, wxEXPAND);
-    connectionForm->AddGrowableCol(1, 1);
-    settingsSizer->Add(connectionForm, 0, wxEXPAND | wxALL, kSpacing);
-
-    auto *mihomoPage = AddPage(book_, "Mihomo");
-    auto *mihomoPageSizer = mihomoPage->GetSizer();
-    auto *mihomoForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
-    mihomoModeChoice_ = new wxChoice(mihomoPage, wxID_ANY);
-    mihomoModeChoice_->Append("Rule");
-    mihomoModeChoice_->Append("Global");
-    mihomoModeChoice_->Append("Direct");
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "Mode"));
-    mihomoForm->Add(mihomoModeChoice_, 1, wxEXPAND);
-
-    mixedPortText_ = new wxTextCtrl(mihomoPage, wxID_ANY);
-    httpPortText_ = new wxTextCtrl(mihomoPage, wxID_ANY);
-    socksPortText_ = new wxTextCtrl(mihomoPage, wxID_ANY);
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "Mixed port"));
-    mihomoForm->Add(mixedPortText_, 1, wxEXPAND);
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "HTTP port"));
-    mihomoForm->Add(httpPortText_, 1, wxEXPAND);
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "SOCKS port"));
-    mihomoForm->Add(socksPortText_, 1, wxEXPAND);
-
-    controllerText_ = new wxTextCtrl(mihomoPage, wxID_ANY);
-    secretText_ = new wxTextCtrl(mihomoPage, wxID_ANY, wxEmptyString,
-                                 wxDefaultPosition, wxDefaultSize, wxTE_PASSWORD);
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "External controller"));
-    mihomoForm->Add(controllerText_, 1, wxEXPAND);
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "Secret"));
-    mihomoForm->Add(secretText_, 1, wxEXPAND);
-
-    mihomoLogLevelChoice_ = new wxChoice(mihomoPage, wxID_ANY);
-    for (const auto& level : {"silent", "error", "warning", "info", "debug", "trace"})
-        mihomoLogLevelChoice_->Append(level);
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "Log level"));
-    mihomoForm->Add(mihomoLogLevelChoice_, 1, wxEXPAND);
-
-    allowLanCheck_ = new wxCheckBox(mihomoPage, wxID_ANY, "Allow LAN connections");
-    ipv6Check_ = new wxCheckBox(mihomoPage, wxID_ANY, "Enable IPv6");
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "Network"));
-    auto *networkChecks = new wxBoxSizer(wxHORIZONTAL);
-    networkChecks->Add(allowLanCheck_, 0, wxRIGHT, kSpacing * 2);
-    networkChecks->Add(ipv6Check_, 0);
-    mihomoForm->Add(networkChecks, 1, wxEXPAND);
-
-    tunEnableCheck_ = new wxCheckBox(mihomoPage, wxID_ANY, "Enable TUN");
-    tunStackChoice_ = new wxChoice(mihomoPage, wxID_ANY);
-    for (const auto& stack : {"gvisor", "system", "mixed"})
-        tunStackChoice_->Append(stack);
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "TUN"));
-    auto *tunControls = new wxBoxSizer(wxHORIZONTAL);
-    tunControls->Add(tunEnableCheck_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, kSpacing * 2);
-    tunControls->Add(tunStackChoice_, 1, wxEXPAND);
-    mihomoForm->Add(tunControls, 1, wxEXPAND);
-
-    dnsEnableCheck_ = new wxCheckBox(mihomoPage, wxID_ANY, "Enable DNS");
-    dnsModeChoice_ = new wxChoice(mihomoPage, wxID_ANY);
-    dnsModeChoice_->Append("fake-ip");
-    dnsModeChoice_->Append("redir-host");
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "DNS"));
-    auto *dnsControls = new wxBoxSizer(wxHORIZONTAL);
-    dnsControls->Add(dnsEnableCheck_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, kSpacing * 2);
-    dnsControls->Add(dnsModeChoice_, 1, wxEXPAND);
-    mihomoForm->Add(dnsControls, 1, wxEXPAND);
-
-    nameserverText_ = new wxTextCtrl(mihomoPage, wxID_ANY, wxEmptyString,
-                                     wxDefaultPosition, wxDefaultSize,
-                                     wxTE_MULTILINE);
-    mihomoForm->Add(new wxStaticText(mihomoPage, wxID_ANY, "DNS nameservers"));
-    mihomoForm->Add(nameserverText_, 1, wxEXPAND);
-    mihomoForm->AddGrowableCol(1, 1);
-    mihomoPageSizer->Add(mihomoForm, 1, wxEXPAND | wxALL, kSpacing);
-
-    mihomoPage->SetSizer(mihomoPageSizer);
-    auto *displayForm = new wxFlexGridSizer(2, kSpacing, kSpacing);
-    logLengthChoice_ = new wxChoice(settings, wxID_ANY);
-    logLengthChoice_->Append("10,000 characters");
-    logLengthChoice_->Append("50,000 characters");
-    logLengthChoice_->Append("100,000 characters");
-    logLengthChoice_->Append("500,000 characters");
-    logLengthChoice_->Append("1,000,000 characters");
-    displayForm->Add(new wxStaticText(settings, wxID_ANY, "Maximum log length"));
-    displayForm->Add(logLengthChoice_, 1, wxEXPAND);
-    displayForm->AddGrowableCol(1, 1);
-    settingsSizer->Add(displayForm, 0, wxEXPAND | wxALL, kSpacing);
-
-    UpdateMihomoControls();
     const std::size_t logLengthValues[] = {10000, 50000, 100000, 500000, 1000000};
     for (unsigned int index = 0; index < 5; ++index)
+    {
         if (logLengthValues[index] == maxLogLength_)
-            logLengthChoice_->SetSelection(index);
-    if (logLengthChoice_->GetSelection() == wxNOT_FOUND)
-        logLengthChoice_->SetSelection(2);
+            settingsPage_->logLength->SetSelection(index);
+    }
+    if (settingsPage_->logLength->GetSelection() == wxNOT_FOUND)
+        settingsPage_->logLength->SetSelection(2);
 
     if (!corePath_.empty())
-        corePathText_->SetValue(wxString::FromUTF8(corePath_));
+        settingsPage_->corePath->SetValue(wxString::FromUTF8(corePath_));
     if (!configPath_.empty())
-        configPathText_->SetValue(wxString::FromUTF8(configPath_));
+        settingsPage_->configPath->SetValue(wxString::FromUTF8(configPath_));
 
-    book_->SetSelection(PageOverview);
+    UpdateMihomoControls();
 }
 
 void MainFrame::OnNavigation(wxCommandEvent &event)
@@ -483,11 +286,11 @@ void MainFrame::OnNavigation(wxCommandEvent &event)
 
 void MainFrame::OnModeChanged(wxCommandEvent &event)
 {
-    if (event.GetEventObject() == logLengthChoice_)
+    if (event.GetEventObject() == settingsPage_->logLength)
     {
         const std::size_t logLengthValues[] = {10000, 50000, 100000, 500000, 1000000};
-        if (logLengthChoice_->GetSelection() >= 0)
-            maxLogLength_ = logLengthValues[logLengthChoice_->GetSelection()];
+        if (settingsPage_->logLength->GetSelection() >= 0)
+            maxLogLength_ = logLengthValues[settingsPage_->logLength->GetSelection()];
         AppendLog(wxString::Format("[info] Display settings updated; log limit: %zu characters\n",
                                    maxLogLength_));
         return;
@@ -511,12 +314,10 @@ void MainFrame::OnMonitorTimer(wxTimerEvent&)
 
 void MainFrame::AppendLog(const wxString& message)
 {
-    if (!logText_)
-        return;
-    logText_->AppendText(message);
-    const auto length = static_cast<std::size_t>(logText_->GetLastPosition());
+    logsPage_->text->AppendText(message);
+    const auto length = static_cast<std::size_t>(logsPage_->text->GetLastPosition());
     if (length > maxLogLength_)
-        logText_->Remove(0, static_cast<long>(length - maxLogLength_));
+        logsPage_->text->Remove(0, static_cast<long>(length - maxLogLength_));
 }
 
 void MainFrame::RefreshCoreData()
@@ -554,13 +355,10 @@ void MainFrame::RefreshCoreData()
                                               connections->is_array()
                                           ? connections->size()
                                           : 0;
-        if (overviewConnections_)
-            overviewConnections_->SetLabel(
-                wxString::Format("Connections: %zu", connectionCount));
+        overviewPage_->connections->SetLabel(
+            wxString::Format("Connections: %zu", connectionCount));
 
-        if (connectionTable_)
-        {
-            connectionTable_->DeleteAllItems();
+        connectionsPage_->table->DeleteAllItems();
             if (connections != connectionsRoot.end() && connections->is_array())
             {
                 for (const auto& connection : *connections)
@@ -586,7 +384,7 @@ void MainFrame::RefreshCoreData()
                                 chains += (*chain)[index].get<std::string>();
                         }
                     }
-                    connectionTable_->AppendItem(
+                    connectionsPage_->table->AppendItem(
                         {target,
                          JsonString(metadataObject, "process"),
                          JsonString(metadataObject, "network"),
@@ -594,7 +392,6 @@ void MainFrame::RefreshCoreData()
                          chains});
                 }
             }
-        }
     }
 
     const auto trafficResponse = apiClient_.GetTraffic();
@@ -613,13 +410,12 @@ void MainFrame::RefreshCoreData()
                 AppendLog("[error] Invalid /traffic JSON: expected an object\n");
                 return;
             }
-            if (overviewTraffic_)
-                overviewTraffic_->SetLabel(
-                    "Download: " +
-                    wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "down"))) +
-                    "/s  Upload: " +
-                    wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "up"))) +
-                    "/s");
+            overviewPage_->traffic->SetLabel(
+                "Download: " +
+                wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "down"))) +
+                "/s  Upload: " +
+                wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "up"))) +
+                "/s");
         }
         catch (const Json::parse_error& exception)
         {
@@ -704,28 +500,29 @@ void MainFrame::RefreshProxies()
             proxyGroupNames_.push_back(name);
         }
     }
-    auto *groupSizer = proxyGroupsPane_ ? proxyGroupsPane_->GetSizer() : nullptr;
+    auto* groupSizer = proxyPage_->groupsPane->GetSizer();
     if (groupSizer)
     {
-        groupSizer->Detach(proxyGroups_);
-        proxyGroups_->Destroy();
+        groupSizer->Detach(proxyPage_->groups);
+        proxyPage_->groups->Destroy();
         wxArrayString labels;
         for (const auto& name : proxyGroupNames_)
             labels.Add(wxString::FromUTF8(name));
         if (labels.empty())
             labels.Add("No groups");
-        proxyGroups_ = new wxRadioBox(proxyGroupsPane_, wxID_HIGHEST + 12,
-                                      "Groups", wxDefaultPosition, wxDefaultSize,
-                                      labels, 1, wxRA_SPECIFY_COLS);
-        groupSizer->Add(proxyGroups_, 1, wxEXPAND);
-        proxyGroupsPane_->Layout();
+        proxyPage_->groups = new wxRadioBox(
+            proxyPage_->groupsPane, wxID_HIGHEST + 12, "Groups",
+            wxDefaultPosition, wxDefaultSize, labels, 1, wxRA_SPECIFY_COLS);
+        groupSizer->Add(proxyPage_->groups, 1, wxEXPAND);
+        proxyPage_->groupsPane->Layout();
     }
     if (!proxyGroupNames_.empty())
     {
-        int selection = proxyGroups_->FindString(wxString::FromUTF8(selectedProxyGroup_));
+        int selection = proxyPage_->groups->FindString(
+            wxString::FromUTF8(selectedProxyGroup_));
         if (selection == wxNOT_FOUND)
             selection = 0;
-        proxyGroups_->SetSelection(selection);
+        proxyPage_->groups->SetSelection(selection);
         selectedProxyGroup_ = proxyGroupNames_[static_cast<std::size_t>(selection)];
     }
     else
@@ -736,11 +533,11 @@ void MainFrame::RefreshProxies()
 
 void MainFrame::OnProxyGroupSelected(wxCommandEvent& event)
 {
-    if (event.GetEventObject() != proxyGroups_ || !proxyGroups_)
+    if (event.GetEventObject() != proxyPage_->groups || !proxyPage_->groups)
         return;
     if (updatingProxyGroups_)
         return;
-    const int selection = proxyGroups_->GetSelection();
+    const int selection = proxyPage_->groups->GetSelection();
     if (selection == wxNOT_FOUND || static_cast<std::size_t>(selection) >= proxyGroupNames_.size())
         return;
     selectedProxyGroup_ = proxyGroupNames_[static_cast<std::size_t>(selection)];
@@ -810,10 +607,8 @@ void MainFrame::RefreshProxyGroup()
 
 void MainFrame::PopulateProxyChoices()
 {
-    if (!proxyChoicesScroll_)
-    {
+    if (!proxyPage_->choicesScroll)
         return;
-    }
     updatingProxyTable_ = true;
     proxyChoiceNames_.clear();
     const auto proxies = proxyData_.find("proxies");
@@ -844,10 +639,10 @@ void MainFrame::PopulateProxyChoices()
         }
         proxyChoiceNames_.push_back(name);
     }
-    auto *choiceSizer = proxyChoicesScroll_->GetSizer();
-    proxyChoiceButtons_.clear();
+    auto* choiceSizer = proxyPage_->choicesScroll->GetSizer();
+    proxyPage_->choiceButtons.clear();
     choiceSizer->Clear(true);
-    choiceSizer->Add(new wxStaticText(proxyChoicesScroll_, wxID_ANY, "Proxies"),
+    choiceSizer->Add(new wxStaticText(proxyPage_->choicesScroll, wxID_ANY, "Proxies"),
                      0, wxBOTTOM, kSpacing);
     for (const auto& name : proxyChoiceNames_)
     {
@@ -857,11 +652,14 @@ void MainFrame::PopulateProxyChoices()
             label += "  [" + JsonString(&(*proxy), "type", "Proxy") + "]";
         if (current != proxyCurrentSelection_.end() && current->second == name)
             label += "  (selected)";
-        auto *button = new wxRadioButton(proxyChoicesScroll_, wxID_HIGHEST + 13,
+        auto* button = new wxRadioButton(proxyPage_->choicesScroll,
+                                         wxID_HIGHEST + 13,
                                          wxString::FromUTF8(label),
                                          wxDefaultPosition, wxDefaultSize,
-                                         proxyChoiceButtons_.empty() ? wxRB_GROUP : 0);
-        proxyChoiceButtons_.push_back(button);
+                                         proxyPage_->choiceButtons.empty()
+                                             ? wxRB_GROUP
+                                             : 0);
+        proxyPage_->choiceButtons.push_back(button);
         choiceSizer->Add(button, 0, wxEXPAND | wxBOTTOM, 4);
     }
     const auto currentName = proxyCurrentSelection_.find(selectedProxyGroup_);
@@ -871,14 +669,15 @@ void MainFrame::PopulateProxyChoices()
                                              proxyChoiceNames_.end(),
                                              currentName->second);
         if (selectedIndex != proxyChoiceNames_.end())
-            proxyChoiceButtons_[static_cast<std::size_t>(std::distance(
+            proxyPage_->choiceButtons[static_cast<std::size_t>(std::distance(
                 proxyChoiceNames_.begin(), selectedIndex))]->SetValue(true);
     }
-    if (proxyChoiceButtons_.empty())
-        choiceSizer->Add(new wxStaticText(proxyChoicesScroll_, wxID_ANY, "No proxies"),
+    if (proxyPage_->choiceButtons.empty())
+        choiceSizer->Add(new wxStaticText(proxyPage_->choicesScroll,
+                                          wxID_ANY, "No proxies"),
                          0, wxEXPAND);
-    proxyChoicesScroll_->FitInside();
-    proxyChoicesScroll_->Layout();
+    proxyPage_->choicesScroll->FitInside();
+    proxyPage_->choicesScroll->Layout();
     updatingProxyTable_ = false;
 }
 
@@ -886,18 +685,18 @@ void MainFrame::OnProxySelected(wxCommandEvent& event)
 {
     if (updatingProxyTable_ || selectedProxyGroup_.empty())
         return;
-    auto *button = dynamic_cast<wxRadioButton*>(event.GetEventObject());
-    const auto it = std::find(proxyChoiceButtons_.begin(),
-                              proxyChoiceButtons_.end(), button);
-    if (it == proxyChoiceButtons_.end())
+    auto* button = dynamic_cast<wxRadioButton*>(event.GetEventObject());
+    const auto it = std::find(proxyPage_->choiceButtons.begin(),
+                              proxyPage_->choiceButtons.end(), button);
+    if (it == proxyPage_->choiceButtons.end())
         return;
     SelectProxy(proxyChoiceNames_[static_cast<std::size_t>(
-        std::distance(proxyChoiceButtons_.begin(), it))]);
+        std::distance(proxyPage_->choiceButtons.begin(), it))]);
 }
 
 void MainFrame::SelectProxy(const std::string& proxyName)
 {
-    if (!proxyChoicesScroll_ || selectedProxyGroup_.empty())
+    if (!proxyPage_->choicesScroll || selectedProxyGroup_.empty())
     {
         AppendLog("[error] Proxy selection failed: no proxy group is selected\n");
         return;
@@ -921,8 +720,8 @@ void MainFrame::SelectProxy(const std::string& proxyName)
 
 void MainFrame::OnConnectApi(wxCommandEvent&)
 {
-    corePath_ = corePathText_ ? corePathText_->GetValue().ToStdString() : std::string{};
-    configPath_ = configPathText_ ? configPathText_->GetValue().ToStdString() : configPath_;
+    corePath_ = settingsPage_->corePath->GetValue().ToStdString();
+    configPath_ = settingsPage_->configPath->GetValue().ToStdString();
 
     std::string runtimeConfigPath;
     std::string settingsError;
@@ -934,16 +733,12 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
         return;
     }
 
-    auto controller = controllerText_ ? controllerText_->GetValue().ToStdString()
-                                      : mihomoConfig_.externalController;
+    auto controller = mihomoPage_->controller->GetValue().ToStdString();
     std::string controllerError;
     if (!ValidateExternalController(controller, controllerError))
     {
-        if (controllerText_)
-        {
-            controllerText_->SetFocus();
-            controllerText_->SelectAll();
-        }
+        mihomoPage_->controller->SetFocus();
+        mihomoPage_->controller->SelectAll();
         wxMessageBox(wxString::FromUTF8(controllerError), "Invalid external controller",
                      wxOK | wxICON_ERROR, this);
         AppendLog("[error] " + wxString::FromUTF8(controllerError) + "\n");
@@ -975,16 +770,14 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
         AppendLog("[error] API error: " + wxString::FromUTF8(response.error) + "\n");
         return;
     }
-    if (overviewStatus_)
-        overviewStatus_->SetLabel("API connected");
+    overviewPage_->status->SetLabel("API connected");
     try
     {
         const auto versionRoot = Json::parse(response.body);
         const auto version = versionRoot.find("version");
         if (version != versionRoot.end() && version->is_string())
-            if (overviewVersion_)
-                overviewVersion_->SetLabel(
-                    "Mihomo version: " + wxString::FromUTF8(version->get<std::string>()));
+            overviewPage_->version->SetLabel(
+                "Mihomo version: " + wxString::FromUTF8(version->get<std::string>()));
     }
     catch (const Json::parse_error&)
     {
@@ -1003,19 +796,14 @@ void MainFrame::OnDisconnectApi(wxCommandEvent&)
     monitorTimer_.Stop();
     if (!mihomoSidecar_.IsRunning())
     {
-        if (overviewStatus_)
-            overviewStatus_->SetLabel("Not connected");
-        if (overviewVersion_)
-            overviewVersion_->SetLabel("Mihomo version: -");
-        if (overviewConnections_)
-            overviewConnections_->SetLabel("Connections: -");
-        if (overviewTraffic_)
-            overviewTraffic_->SetLabel("Traffic: -");
+        overviewPage_->status->SetLabel("Not connected");
+        overviewPage_->version->SetLabel("Mihomo version: -");
+        overviewPage_->connections->SetLabel("Connections: -");
+        overviewPage_->traffic->SetLabel("Traffic: -");
         return;
     }
 
-    if (overviewStatus_)
-        overviewStatus_->SetLabel("Disconnecting...");
+    overviewPage_->status->SetLabel("Disconnecting...");
     mihomoSidecar_.RequestStop();
 }
 
@@ -1047,15 +835,13 @@ void MainFrame::OnBrowseCore(wxCommandEvent&)
     if (dialog.ShowModal() == wxID_OK)
     {
         corePath_ = dialog.GetPath().ToStdString();
-        if (corePathText_)
-            corePathText_->SetValue(dialog.GetPath());
+        settingsPage_->corePath->SetValue(dialog.GetPath());
     }
 }
 
 void MainFrame::OnBrowseConfig(wxCommandEvent&)
 {
-    const wxFileName currentPath(configPathText_ ? configPathText_->GetValue()
-                                                  : wxString{});
+    const wxFileName currentPath(settingsPage_->configPath->GetValue());
     wxFileDialog dialog(this, "Select mihomo config",
                         currentPath.GetPath(), currentPath.GetFullName(),
                         "YAML files (*.yaml;*.yml)|*.yaml;*.yml|All files|*.*",
@@ -1075,36 +861,34 @@ void MainFrame::OnBrowseConfig(wxCommandEvent&)
         return;
     }
     configPath_ = dialog.GetPath().ToStdString();
-    if (configPathText_)
-        configPathText_->SetValue(dialog.GetPath());
+    settingsPage_->configPath->SetValue(dialog.GetPath());
     UpdateMihomoControls();
     SaveSettings(corePath_, configPath_, maxLogLength_);
-    if (overviewStatus_)
-        overviewStatus_->SetLabel("Base config selected: " + dialog.GetFilename());
+    overviewPage_->status->SetLabel("Base config selected: " + dialog.GetFilename());
 }
 
 bool MainFrame::SaveMihomoSettings(std::string& error)
 {
-    mihomoConfig_.mode = mihomoModeChoice_->GetStringSelection().ToStdString();
-    mihomoConfig_.logLevel = mihomoLogLevelChoice_->GetStringSelection().ToStdString();
-    mihomoConfig_.tunStack = tunStackChoice_->GetStringSelection().ToStdString();
-    mihomoConfig_.dnsEnhancedMode = dnsModeChoice_->GetStringSelection().ToStdString();
-    mihomoConfig_.externalController = controllerText_->GetValue().ToStdString();
+    mihomoConfig_.mode = mihomoPage_->mode->GetStringSelection().ToStdString();
+    mihomoConfig_.logLevel = mihomoPage_->logLevel->GetStringSelection().ToStdString();
+    mihomoConfig_.tunStack = mihomoPage_->tunStack->GetStringSelection().ToStdString();
+    mihomoConfig_.dnsEnhancedMode = mihomoPage_->dnsMode->GetStringSelection().ToStdString();
+    mihomoConfig_.externalController = mihomoPage_->controller->GetValue().ToStdString();
     std::string controllerError;
     if (!ValidateExternalController(mihomoConfig_.externalController, controllerError))
     {
-        controllerText_->SetFocus();
-        controllerText_->SelectAll();
+        mihomoPage_->controller->SetFocus();
+        mihomoPage_->controller->SelectAll();
         wxMessageBox(wxString::FromUTF8(controllerError), "Invalid external controller",
                      wxOK | wxICON_ERROR, this);
         AppendLog("[error] " + wxString::FromUTF8(controllerError) + "\n");
         return false;
     }
-    mihomoConfig_.secret = secretText_->GetValue().ToStdString();
-    mihomoConfig_.allowLan = allowLanCheck_->GetValue();
-    mihomoConfig_.ipv6 = ipv6Check_->GetValue();
-    mihomoConfig_.tunEnable = tunEnableCheck_->GetValue();
-    mihomoConfig_.dnsEnable = dnsEnableCheck_->GetValue();
+    mihomoConfig_.secret = mihomoPage_->secret->GetValue().ToStdString();
+    mihomoConfig_.allowLan = mihomoPage_->allowLan->GetValue();
+    mihomoConfig_.ipv6 = mihomoPage_->ipv6->GetValue();
+    mihomoConfig_.tunEnable = mihomoPage_->tunEnable->GetValue();
+    mihomoConfig_.dnsEnable = mihomoPage_->dnsEnable->GetValue();
 
     const auto readPort = [](wxTextCtrl* control, int current) {
         long value = 0;
@@ -1112,12 +896,12 @@ bool MainFrame::SaveMihomoSettings(std::string& error)
                    ? static_cast<int>(value)
                    : current;
     };
-    mihomoConfig_.mixedPort = readPort(mixedPortText_, mihomoConfig_.mixedPort);
-    mihomoConfig_.httpPort = readPort(httpPortText_, mihomoConfig_.httpPort);
-    mihomoConfig_.socksPort = readPort(socksPortText_, mihomoConfig_.socksPort);
+    mihomoConfig_.mixedPort = readPort(mihomoPage_->mixedPort, mihomoConfig_.mixedPort);
+    mihomoConfig_.httpPort = readPort(mihomoPage_->httpPort, mihomoConfig_.httpPort);
+    mihomoConfig_.socksPort = readPort(mihomoPage_->socksPort, mihomoConfig_.socksPort);
 
     mihomoConfig_.dnsNameservers.clear();
-    wxStringTokenizer tokens(nameserverText_->GetValue(), "\n", wxTOKEN_STRTOK);
+    wxStringTokenizer tokens(mihomoPage_->nameservers->GetValue(), "\n", wxTOKEN_STRTOK);
     while (tokens.HasMoreTokens())
     {
         const auto value = tokens.GetNextToken().Trim(true).Trim(false);
@@ -1145,21 +929,21 @@ void MainFrame::UpdateMihomoControls()
         const int index = choice->FindString(wxString::FromUTF8(value));
         choice->SetSelection(index == wxNOT_FOUND ? 0 : index);
     };
-    selectChoice(mihomoModeChoice_, mihomoConfig_.mode);
-    selectChoice(mihomoLogLevelChoice_, mihomoConfig_.logLevel);
-    selectChoice(tunStackChoice_, mihomoConfig_.tunStack);
-    selectChoice(dnsModeChoice_, mihomoConfig_.dnsEnhancedMode);
-    mixedPortText_->SetValue(std::to_string(mihomoConfig_.mixedPort));
-    httpPortText_->SetValue(std::to_string(mihomoConfig_.httpPort));
-    socksPortText_->SetValue(std::to_string(mihomoConfig_.socksPort));
-    controllerText_->SetValue(wxString::FromUTF8(mihomoConfig_.externalController));
-    secretText_->SetValue(wxString::FromUTF8(mihomoConfig_.secret));
-    allowLanCheck_->SetValue(mihomoConfig_.allowLan);
-    ipv6Check_->SetValue(mihomoConfig_.ipv6);
-    tunEnableCheck_->SetValue(mihomoConfig_.tunEnable);
-    dnsEnableCheck_->SetValue(mihomoConfig_.dnsEnable);
+    selectChoice(mihomoPage_->mode, mihomoConfig_.mode);
+    selectChoice(mihomoPage_->logLevel, mihomoConfig_.logLevel);
+    selectChoice(mihomoPage_->tunStack, mihomoConfig_.tunStack);
+    selectChoice(mihomoPage_->dnsMode, mihomoConfig_.dnsEnhancedMode);
+    mihomoPage_->mixedPort->SetValue(std::to_string(mihomoConfig_.mixedPort));
+    mihomoPage_->httpPort->SetValue(std::to_string(mihomoConfig_.httpPort));
+    mihomoPage_->socksPort->SetValue(std::to_string(mihomoConfig_.socksPort));
+    mihomoPage_->controller->SetValue(wxString::FromUTF8(mihomoConfig_.externalController));
+    mihomoPage_->secret->SetValue(wxString::FromUTF8(mihomoConfig_.secret));
+    mihomoPage_->allowLan->SetValue(mihomoConfig_.allowLan);
+    mihomoPage_->ipv6->SetValue(mihomoConfig_.ipv6);
+    mihomoPage_->tunEnable->SetValue(mihomoConfig_.tunEnable);
+    mihomoPage_->dnsEnable->SetValue(mihomoConfig_.dnsEnable);
     wxString nameservers;
     for (const auto& nameserver : mihomoConfig_.dnsNameservers)
         nameservers += wxString::FromUTF8(nameserver) + "\n";
-    nameserverText_->SetValue(nameservers);
+    mihomoPage_->nameservers->SetValue(nameservers);
 }

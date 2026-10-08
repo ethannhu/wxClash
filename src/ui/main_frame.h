@@ -14,18 +14,11 @@
 #include "../api/mihomo_api_client.h"
 #include "../config/app_config.h"
 #include "../core/mihomo_sidecar.h"
+#include "pages.h"
 
-class wxCheckBox;
-class wxChoice;
-class wxDataViewListCtrl;
 class wxSimplebook;
-class wxRadioBox;
 class wxRadioButton;
-class wxPanel;
-class wxScrolledWindow;
 class wxSizer;
-class wxStaticText;
-class wxTextCtrl;
 class wxWindow;
 
 class MainFrame final : public wxFrame
@@ -73,34 +66,12 @@ private:
     void AppendLog(const wxString& message);
 
     wxSimplebook* book_ = nullptr;
-    wxTextCtrl* logText_ = nullptr;
-    wxStaticText* overviewStatus_ = nullptr;
-    wxStaticText* overviewVersion_ = nullptr;
-    wxStaticText* overviewConnections_ = nullptr;
-    wxStaticText* overviewTraffic_ = nullptr;
-    wxRadioBox* proxyGroups_ = nullptr;
-    wxPanel* proxyGroupsPane_ = nullptr;
-    wxPanel* proxyChoicesPane_ = nullptr;
-    wxScrolledWindow* proxyChoicesScroll_ = nullptr;
-    std::vector<wxRadioButton*> proxyChoiceButtons_;
-    wxDataViewListCtrl* connectionTable_ = nullptr;
-    wxTextCtrl* corePathText_ = nullptr;
-    wxTextCtrl* configPathText_ = nullptr;
-    wxChoice* mihomoModeChoice_ = nullptr;
-    wxChoice* mihomoLogLevelChoice_ = nullptr;
-    wxChoice* tunStackChoice_ = nullptr;
-    wxChoice* dnsModeChoice_ = nullptr;
-    wxTextCtrl* mixedPortText_ = nullptr;
-    wxTextCtrl* httpPortText_ = nullptr;
-    wxTextCtrl* socksPortText_ = nullptr;
-    wxTextCtrl* controllerText_ = nullptr;
-    wxTextCtrl* secretText_ = nullptr;
-    wxTextCtrl* nameserverText_ = nullptr;
-    wxChoice* logLengthChoice_ = nullptr;
-    wxCheckBox* allowLanCheck_ = nullptr;
-    wxCheckBox* ipv6Check_ = nullptr;
-    wxCheckBox* tunEnableCheck_ = nullptr;
-    wxCheckBox* dnsEnableCheck_ = nullptr;
+    OverviewPage* overviewPage_ = nullptr;
+    ProxyPage* proxyPage_ = nullptr;
+    ConnectionsPage* connectionsPage_ = nullptr;
+    LogsPage* logsPage_ = nullptr;
+    SettingsPage* settingsPage_ = nullptr;
+    MihomoPage* mihomoPage_ = nullptr;
     std::string corePath_;
     std::string dataPath_;
     std::string configPath_;

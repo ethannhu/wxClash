@@ -71,6 +71,7 @@ executable(
     'src/api/mihomo_api_client.cpp',
     'src/core/mihomo_sidecar.cpp',
     'src/ui/main_frame.cpp',
+    'src/ui/pages.cpp',
   ],
   dependencies: [wx_dep, yaml_cpp_dep, nlohmann_json_dep],
   cpp_args: cpp_args,

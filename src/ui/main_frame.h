@@ -50,7 +50,7 @@ private:
     void OnConnectApi(wxCommandEvent& event);
     void OnDisconnectApi(wxCommandEvent& event);
     void OnClose(wxCloseEvent& event);
-    void OnSidecarOutput(wxTimerEvent& event);
+    void OnSidecarEvent(wxThreadEvent& event);
     void OnMonitorTimer(wxTimerEvent& event);
     void OnApiResult(wxThreadEvent& event);
     void OnProxyGroupSelected(wxCommandEvent& event);
@@ -85,7 +85,6 @@ private:
     MihomoConfig mihomoConfig_;
     MihomoApiService apiService_;
     MihomoSidecar mihomoSidecar_;
-    wxTimer sidecarOutputTimer_;
     wxTimer monitorTimer_;
     bool apiConnected_ = false;
     bool closing_ = false;

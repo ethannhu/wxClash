@@ -147,9 +147,10 @@ namespace
 
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_CLOSE(MainFrame::OnClose)
-    EVT_TIMER(static_cast<int>(ControlId::SidecarOutputTimer), MainFrame::OnSidecarOutput)
     EVT_TIMER(static_cast<int>(ControlId::MonitorTimer), MainFrame::OnMonitorTimer)
     EVT_THREAD(wxID_ANY, MainFrame::OnApiResult)
+    wx__DECLARE_EVT1(EVT_MIHOMO_SIDECAR, wxID_ANY,
+                     wxThreadEventHandler(MainFrame::OnSidecarEvent))
     EVT_BUTTON(static_cast<int>(ControlId::ConnectApi), MainFrame::OnConnectApi)
     EVT_BUTTON(static_cast<int>(ControlId::DisconnectApi), MainFrame::OnDisconnectApi)
     EVT_RADIOBOX(static_cast<int>(ControlId::ProxyGroup), MainFrame::OnProxyGroupSelected)
@@ -164,7 +165,6 @@ MainFrame::MainFrame()
     : wxFrame(nullptr, wxID_ANY, "WxClash", wxDefaultPosition, wxSize(1100, 700),
       wxDEFAULT_FRAME_STYLE),
       apiService_(MihomoApiConfig{}, this),
-      sidecarOutputTimer_(this, static_cast<int>(ControlId::SidecarOutputTimer)),
       monitorTimer_(this, static_cast<int>(ControlId::MonitorTimer))
 {
     LoadSettings(corePath_, configPath_, maxLogLength_);
@@ -177,21 +177,6 @@ MainFrame::MainFrame()
         std::cerr << "[WxClash] " << configError << std::endl;
     if (!mihomoConfig_.LoadOverrides(MihomoOverridesPath(dataPath_), configError))
         std::cerr << "[WxClash] " << configError << std::endl;
-
-    mihomoSidecar_.SetOutputCallback([this](const std::string& message) {
-        AppendLog(wxString::FromUTF8(message) + "\n");
-    });
-    mihomoSidecar_.SetTerminationCallback([this] {
-        if (closing_)
-            Destroy();
-        else
-        {
-            overviewPage_->status->SetLabel("Not connected");
-            overviewPage_->version->SetLabel("Mihomo version: -");
-            overviewPage_->connections->SetLabel("Connections: -");
-            overviewPage_->traffic->SetLabel("Traffic: -");
-        }
-    });
 
     auto *rootSizer = new wxBoxSizer(wxVERTICAL);
     auto *contentSizer = new wxBoxSizer(wxHORIZONTAL);
@@ -207,7 +192,7 @@ MainFrame::MainFrame()
 
 MainFrame::~MainFrame()
 {
-    sidecarOutputTimer_.Stop();
+    mihomoSidecar_.RequestStop();
     monitorTimer_.Stop();
     if (mihomoPage_)
     {
@@ -299,10 +284,21 @@ void MainFrame::OnModeChanged(wxCommandEvent &event)
     }
 }
 
-void MainFrame::OnSidecarOutput(wxTimerEvent&)
+void MainFrame::OnSidecarEvent(wxThreadEvent& event)
 {
-    if (mihomoSidecar_.IsRunning())
-        mihomoSidecar_.PollOutput();
+    const auto sidecarEvent = event.GetPayload<MihomoSidecarEvent>();
+    if (sidecarEvent.type == MihomoSidecarEventType::Output)
+    {
+        AppendLog(wxString::FromUTF8(sidecarEvent.message) + "\n");
+        return;
+    }
+
+    if (closing_)
+        return;
+    overviewPage_->status->SetLabel("Not connected");
+    overviewPage_->version->SetLabel("Mihomo version: -");
+    overviewPage_->connections->SetLabel("Connections: -");
+    overviewPage_->traffic->SetLabel("Traffic: -");
 }
 
 void MainFrame::OnMonitorTimer(wxTimerEvent&)
@@ -733,7 +729,6 @@ void MainFrame::OnApiResult(wxThreadEvent& event)
                     "Mihomo version: " + wxString::FromUTF8(version->get<std::string>()));
         }
         catch (const Json::exception&) {}
-        sidecarOutputTimer_.Start(200);
         monitorTimer_.Start(2000);
         return;
     }
@@ -826,7 +821,6 @@ void MainFrame::OnDisconnectApi(wxCommandEvent&)
 {
     connecting_ = false;
     apiConnected_ = false;
-    sidecarOutputTimer_.Stop();
     monitorTimer_.Stop();
     if (!mihomoSidecar_.IsRunning())
     {
@@ -850,17 +844,11 @@ void MainFrame::OnClose(wxCloseEvent& event)
     closing_ = true;
     connecting_ = false;
     apiConnected_ = false;
-    sidecarOutputTimer_.Stop();
     monitorTimer_.Stop();
     apiService_.Shutdown();
 
-    if (!mihomoSidecar_.IsRunning())
-    {
-        Destroy();
-        return;
-    }
-
     mihomoSidecar_.RequestStop();
+    Destroy();
 }
 
 void MainFrame::OnBrowseCore(wxCommandEvent&)

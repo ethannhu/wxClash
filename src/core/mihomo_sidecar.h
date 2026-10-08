@@ -1,14 +1,27 @@
 #pragma once
 
+#include <wx/event.h>
+
+#include <atomic>
 #include <functional>
 #include <string>
-#include <utility>
+#include <thread>
 
-#include <wx/process.h>
+wxDECLARE_EVENT(EVT_MIHOMO_SIDECAR, wxThreadEvent);
 
-class wxInputStream;
+enum class MihomoSidecarEventType
+{
+    Output,
+    Terminated,
+};
+
+struct MihomoSidecarEvent
+{
+    MihomoSidecarEventType type;
+    std::string message;
+};
+
 class wxEvtHandler;
-class MihomoSidecarProcess;
 
 class MihomoSidecar final
 {
@@ -24,32 +37,20 @@ public:
     bool Start(const std::string& corePath,
                const std::string& dataPath,
                const std::string& runtimeConfigPath,
-               wxEvtHandler* processParent,
+               wxEvtHandler* eventHandler,
                std::string& error);
     void RequestStop();
-    void PollOutput();
-    void SetOutputCallback(std::function<void(const std::string&)> callback)
-    {
-        outputCallback_ = std::move(callback);
-    }
-    void SetTerminationCallback(std::function<void()> callback)
-    {
-        terminationCallback_ = std::move(callback);
-    }
-    bool IsRunning() const { return pid_ > 0; }
+    bool IsRunning() const { return running_.load(); }
 
 private:
-    friend class MihomoSidecarProcess;
+    void WorkerMain(std::stop_token stopToken,
+                    std::string corePath,
+                    std::string dataPath,
+                    std::string runtimeConfigPath,
+                    std::function<void(std::string)> reportStartError);
+    void PostEvent(MihomoSidecarEvent event);
 
-    void OnProcessTerminated(long pid, int status);
-    void DrainStream(wxInputStream* stream, std::string& pending,
-                     const char* label, bool mirrorToConsole);
-    void FlushPendingOutput();
-
-    long pid_ = -1;
-    MihomoSidecarProcess* process_ = nullptr;
-    std::function<void(const std::string&)> outputCallback_;
-    std::function<void()> terminationCallback_;
-    std::string stdoutPending_;
-    std::string stderrPending_;
+    wxEvtHandler* eventHandler_ = nullptr;
+    std::jthread worker_;
+    std::atomic<bool> running_ = false;
 };

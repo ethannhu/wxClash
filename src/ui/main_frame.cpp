@@ -148,7 +148,8 @@ namespace
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_CLOSE(MainFrame::OnClose)
     EVT_TIMER(static_cast<int>(ControlId::MonitorTimer), MainFrame::OnMonitorTimer)
-    EVT_THREAD(wxID_ANY, MainFrame::OnApiResult)
+    wx__DECLARE_EVT1(EVT_MIHOMO_API, wxID_ANY,
+                     wxThreadEventHandler(MainFrame::OnApiResult))
     wx__DECLARE_EVT1(EVT_MIHOMO_SIDECAR, wxID_ANY,
                      wxThreadEventHandler(MainFrame::OnSidecarEvent))
     EVT_BUTTON(static_cast<int>(ControlId::ConnectApi), MainFrame::OnConnectApi)

@@ -12,6 +12,8 @@
 #include <string>
 #include <thread>
 
+wxDECLARE_EVENT(EVT_MIHOMO_API, wxThreadEvent);
+
 enum class MihomoApiOperation { Connect, Version, Connections, Traffic, Proxies, ProxyGroup, SelectProxy };
 
 struct MihomoApiResult

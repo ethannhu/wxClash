@@ -11,6 +11,8 @@ namespace
     constexpr int kProbeIntervalMs = 100;
 }
 
+wxDEFINE_EVENT(EVT_MIHOMO_API, wxThreadEvent);
+
 MihomoApiService::MihomoApiService(MihomoApiConfig config, wxEvtHandler* resultHandler)
     : client_(std::move(config)), resultHandler_(resultHandler),
       worker_(&MihomoApiService::WorkerMain, this)
@@ -118,7 +120,7 @@ void MihomoApiService::PostResult(MihomoApiResult result)
 {
     if (!resultHandler_)
         return;
-    auto* event = new wxThreadEvent(wxEVT_THREAD);
+    auto* event = new wxThreadEvent(EVT_MIHOMO_API);
     event->SetPayload(std::move(result));
     wxQueueEvent(resultHandler_, event);
 }

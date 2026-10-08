@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../api/mihomo_api_client.h"
+#include "../api/mihomo_api_service.h"
 #include "../config/app_config.h"
 #include "../core/mihomo_sidecar.h"
 #include "pages.h"
@@ -51,6 +52,7 @@ private:
     void OnClose(wxCloseEvent& event);
     void OnSidecarOutput(wxTimerEvent& event);
     void OnMonitorTimer(wxTimerEvent& event);
+    void OnApiResult(wxThreadEvent& event);
     void OnProxyGroupSelected(wxCommandEvent& event);
     void OnProxySelected(wxCommandEvent& event);
     void OnBrowseCore(wxCommandEvent& event);
@@ -63,6 +65,11 @@ private:
     void RefreshProxyGroup();
     void PopulateProxyChoices();
     void SelectProxy(const std::string& proxyName);
+    void ApplyConnections(const MihomoApiResponse& response);
+    void ApplyTraffic(const MihomoApiResponse& response);
+    void ApplyProxies(const MihomoApiResponse& response);
+    void ApplyProxyGroup(const MihomoApiResult& result);
+    void HandleApiError(const MihomoApiResult& result);
     void AppendLog(const wxString& message);
 
     wxSimplebook* book_ = nullptr;
@@ -76,7 +83,7 @@ private:
     std::string dataPath_;
     std::string configPath_;
     MihomoConfig mihomoConfig_;
-    MihomoApiClient apiClient_;
+    MihomoApiService apiService_;
     MihomoSidecar mihomoSidecar_;
     wxTimer sidecarOutputTimer_;
     wxTimer monitorTimer_;
@@ -91,6 +98,10 @@ private:
     std::string selectedProxyGroup_;
     bool updatingProxyTable_ = false;
     bool updatingProxyGroups_ = false;
+    std::uint64_t connectRequestId_ = 0;
+    std::uint64_t proxyRequestId_ = 0;
+    std::uint64_t proxyGroupRequestId_ = 0;
+    bool connecting_ = false;
 
     wxDECLARE_EVENT_TABLE();
 };

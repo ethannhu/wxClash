@@ -70,6 +70,7 @@ executable(
     'src/config/app_config.cpp',
     'src/api/http_transport.cpp',
     'src/api/mihomo_api_client.cpp',
+    'src/api/mihomo_api_service.cpp',
     'src/core/mihomo_sidecar.cpp',
     'src/ui/main_frame.cpp',
     'src/ui/pages.cpp',

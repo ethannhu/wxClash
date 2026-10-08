@@ -160,7 +160,11 @@ HttpResponse HttpTransport::Send(const HttpRequest& request) const
     wxIPV4address address;
     address.Hostname(host);
     address.Service(port);
-    wxSocketClient socket;
+    // wxSocketClient defaults to a non-blocking socket. wxWidgets only allows
+    // those to be created on the main thread because they depend on the GUI
+    // socket event loop. This transport runs in MihomoApiService's worker
+    // thread, so explicitly use a blocking socket here.
+    wxSocketClient socket(wxSOCKET_BLOCK);
     const int timeoutMs = std::max(1, request.timeoutMs);
     socket.SetTimeout(static_cast<unsigned>((timeoutMs + 999) / 1000));
     if (!socket.Connect(address, true))

@@ -1,6 +1,5 @@
 #include "mihomo_sidecar.h"
 
-#include "../api/mihomo_api_client.h"
 #include <wx/dir.h>
 #include <wx/ffile.h>
 #include <wx/filefn.h>
@@ -19,9 +18,6 @@
 
 namespace
 {
-    constexpr int kReadyAttempts = 100;
-    constexpr unsigned kReadyIntervalMs = 100;
-
     wxString ToWx(const std::string& value)
     {
         return wxString::FromUTF8(value);
@@ -74,7 +70,6 @@ MihomoSidecar::~MihomoSidecar() = default;
 bool MihomoSidecar::Start(const std::string& corePath,
                           const std::string& dataPath,
                           const std::string& runtimeConfigPath,
-                          const MihomoApiClient& apiClient,
                           wxEvtHandler* processParent,
                           std::string& error)
 {
@@ -114,21 +109,7 @@ bool MihomoSidecar::Start(const std::string& corePath,
         return Fail(error, "Unable to start mihomo sidecar");
     }
 
-    MihomoApiClient probe = apiClient;
-    probe.SetTimeoutMs(300);
-    for (int attempt = 0; attempt < kReadyAttempts; ++attempt)
-    {
-        const auto response = probe.GetVersion();
-        if (response.ok)
-            return true;
-
-        wxMilliSleep(kReadyIntervalMs);
-    }
-
-    error = "mihomo sidecar did not become ready";
-    std::cerr << "[WxClash] " << error << std::endl;
-    RequestStop();
-    return false;
+    return true;
 }
 
 void MihomoSidecar::RequestStop()

@@ -149,6 +149,7 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_CLOSE(MainFrame::OnClose)
     EVT_TIMER(static_cast<int>(ControlId::SidecarOutputTimer), MainFrame::OnSidecarOutput)
     EVT_TIMER(static_cast<int>(ControlId::MonitorTimer), MainFrame::OnMonitorTimer)
+    EVT_THREAD(wxID_ANY, MainFrame::OnApiResult)
     EVT_BUTTON(static_cast<int>(ControlId::ConnectApi), MainFrame::OnConnectApi)
     EVT_BUTTON(static_cast<int>(ControlId::DisconnectApi), MainFrame::OnDisconnectApi)
     EVT_RADIOBOX(static_cast<int>(ControlId::ProxyGroup), MainFrame::OnProxyGroupSelected)
@@ -162,6 +163,7 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
 MainFrame::MainFrame()
     : wxFrame(nullptr, wxID_ANY, "WxClash", wxDefaultPosition, wxSize(1100, 700),
       wxDEFAULT_FRAME_STYLE),
+      apiService_(MihomoApiConfig{}, this),
       sidecarOutputTimer_(this, static_cast<int>(ControlId::SidecarOutputTimer)),
       monitorTimer_(this, static_cast<int>(ControlId::MonitorTimer))
 {
@@ -325,106 +327,84 @@ void MainFrame::RefreshCoreData()
 {
     if (!apiConnected_)
         return;
+    apiService_.GetConnections();
+    apiService_.GetTraffic();
+}
 
-    const auto connectionsResponse = apiClient_.GetConnections();
-    if (!connectionsResponse.ok)
+void MainFrame::ApplyConnections(const MihomoApiResponse& response)
+{
+    if (!response.ok)
     {
         AppendLog("[error] Monitor error (/connections): " +
-                  wxString::FromUTF8(connectionsResponse.error) + "\n");
+                  wxString::FromUTF8(response.error) + "\n");
         return;
     }
-
-    Json connectionsRoot;
-    try
-    {
-        connectionsRoot = Json::parse(connectionsResponse.body);
-    }
+    Json root;
+    try { root = Json::parse(response.body); }
     catch (const Json::parse_error& exception)
     {
         AppendLog("[error] Invalid /connections JSON: " +
                   wxString::FromUTF8(exception.what()) + "\n");
         return;
     }
-    if (!connectionsRoot.is_object())
+    if (!root.is_object())
     {
         AppendLog("[error] Invalid /connections JSON: expected an object\n");
         return;
     }
+    const auto connections = root.find("connections");
+    const auto count = connections != root.end() && connections->is_array()
+                           ? connections->size() : 0;
+    overviewPage_->connections->SetLabel(wxString::Format("Connections: %zu", count));
+    connectionsPage_->table->DeleteAllItems();
+    if (connections == root.end() || !connections->is_array())
+        return;
+    for (const auto& connection : *connections)
     {
-        const auto connections = connectionsRoot.find("connections");
-        const auto connectionCount = connections != connectionsRoot.end() &&
-                                              connections->is_array()
-                                          ? connections->size()
-                                          : 0;
-        overviewPage_->connections->SetLabel(
-            wxString::Format("Connections: %zu", connectionCount));
-
-        connectionsPage_->table->DeleteAllItems();
-            if (connections != connectionsRoot.end() && connections->is_array())
+        const auto metadata = connection.find("metadata");
+        const auto metadataObject = metadata != connection.end() ? &(*metadata) : nullptr;
+        std::string target = JsonString(metadataObject, "host");
+        if (target.empty()) target = JsonString(metadataObject, "destinationIP");
+        const auto port = JsonString(metadataObject, "destinationPort");
+        if (!port.empty()) target += ":" + port;
+        std::string chains;
+        const auto chain = connection.find("chains");
+        if (chain != connection.end() && chain->is_array())
+            for (std::size_t i = 0; i < chain->size(); ++i)
             {
-                for (const auto& connection : *connections)
-                {
-                    const auto metadata = connection.find("metadata");
-                    const auto metadataObject = metadata != connection.end() ? &(*metadata) : nullptr;
-                    std::string target = JsonString(metadataObject, "host");
-                    if (target.empty())
-                        target = JsonString(metadataObject, "destinationIP");
-                    const auto port = JsonString(metadataObject, "destinationPort");
-                    if (!port.empty())
-                        target += ":" + port;
-
-                    std::string chains;
-                    const auto chain = connection.find("chains");
-                    if (chain != connection.end() && chain->is_array())
-                    {
-                        for (std::size_t index = 0; index < chain->size(); ++index)
-                        {
-                            if (index != 0)
-                                chains += " / ";
-                            if ((*chain)[index].is_string())
-                                chains += (*chain)[index].get<std::string>();
-                        }
-                    }
-                    connectionsPage_->table->AppendItem(
-                        {target,
-                         JsonString(metadataObject, "process"),
-                         JsonString(metadataObject, "network"),
-                         JsonString(&connection, "rule"),
-                         chains});
-                }
+                if (i != 0) chains += " / ";
+                if ((*chain)[i].is_string()) chains += (*chain)[i].get<std::string>();
             }
+        connectionsPage_->table->AppendItem({target,
+            JsonString(metadataObject, "process"), JsonString(metadataObject, "network"),
+            JsonString(&connection, "rule"), chains});
     }
+}
 
-    const auto trafficResponse = apiClient_.GetTraffic();
-    if (!trafficResponse.ok)
+void MainFrame::ApplyTraffic(const MihomoApiResponse& response)
+{
+    if (!response.ok)
     {
         AppendLog("[error] Monitor error (/traffic): " +
-                  wxString::FromUTF8(trafficResponse.error) + "\n");
+                  wxString::FromUTF8(response.error) + "\n");
+        return;
     }
-    else
+    try
     {
-        try
+        const auto traffic = Json::parse(response.body);
+        if (!traffic.is_object())
         {
-            const auto traffic = Json::parse(trafficResponse.body);
-            if (!traffic.is_object())
-            {
-                AppendLog("[error] Invalid /traffic JSON: expected an object\n");
-                return;
-            }
-            overviewPage_->traffic->SetLabel(
-                "Download: " +
-                wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "down"))) +
-                "/s  Upload: " +
-                wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "up"))) +
-                "/s");
+            AppendLog("[error] Invalid /traffic JSON: expected an object\n");
+            return;
         }
-        catch (const Json::parse_error& exception)
-        {
-            AppendLog("[error] Invalid /traffic JSON: " +
-                      wxString::FromUTF8(exception.what()) + "\n");
-        }
+        overviewPage_->traffic->SetLabel(
+            "Download: " + wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "down"))) +
+            "/s  Upload: " + wxString::FromUTF8(FormatBytes(JsonUint64(&traffic, "up"))) + "/s");
     }
-
+    catch (const Json::exception& exception)
+    {
+        AppendLog("[error] Invalid /traffic JSON: " + wxString::FromUTF8(exception.what()) + "\n");
+    }
 }
 
 void MainFrame::RefreshProxies()
@@ -434,7 +414,11 @@ void MainFrame::RefreshProxies()
         AppendLog("[warning] Proxy refresh skipped: API is not connected\n");
         return;
     }
-    const auto response = apiClient_.GetProxies();
+    proxyRequestId_ = apiService_.GetProxies();
+}
+
+void MainFrame::ApplyProxies(const MihomoApiResponse& response)
+{
     if (!response.ok)
     {
         AppendLog("[error] Monitor error (/proxies): " +
@@ -554,7 +538,12 @@ void MainFrame::RefreshProxyGroup()
         return;
     }
 
-    const auto response = apiClient_.GetProxy(selectedProxyGroup_);
+    proxyGroupRequestId_ = apiService_.GetProxy(selectedProxyGroup_);
+}
+
+void MainFrame::ApplyProxyGroup(const MihomoApiResult& result)
+{
+    const auto& response = result.response;
     if (!response.ok)
     {
         AppendLog("[error] Proxy group refresh failed (" +
@@ -708,20 +697,87 @@ void MainFrame::SelectProxy(const std::string& proxyName)
         AppendLog("[error] Proxy selection failed: selected proxy name is empty\n");
         return;
     }
-    const auto response = apiClient_.SelectProxy(selectedProxyGroup_, proxyName);
-    if (!response.ok)
+    apiService_.SelectProxy(selectedProxyGroup_, proxyName);
+}
+
+void MainFrame::HandleApiError(const MihomoApiResult& result)
+{
+    if (result.operation == MihomoApiOperation::Connect)
+        AppendLog("[error] API connection failed: " +
+                  wxString::FromUTF8(result.response.error) + "\n");
+}
+
+void MainFrame::OnApiResult(wxThreadEvent& event)
+{
+    const auto result = event.GetPayload<MihomoApiResult>();
+    if (result.operation == MihomoApiOperation::Connect)
     {
-        AppendLog("[error] Proxy selection failed: " + wxString::FromUTF8(response.error) + "\n");
+        if (!connecting_ || result.requestId != connectRequestId_)
+            return;
+        connecting_ = false;
+        if (!result.response.ok)
+        {
+            apiConnected_ = false;
+            mihomoSidecar_.RequestStop();
+            HandleApiError(result);
+            return;
+        }
+        apiConnected_ = true;
+        overviewPage_->status->SetLabel("API connected");
+        try
+        {
+            const auto root = Json::parse(result.response.body);
+            const auto version = root.find("version");
+            if (version != root.end() && version->is_string())
+                overviewPage_->version->SetLabel(
+                    "Mihomo version: " + wxString::FromUTF8(version->get<std::string>()));
+        }
+        catch (const Json::exception&) {}
+        sidecarOutputTimer_.Start(200);
+        monitorTimer_.Start(2000);
         return;
     }
-    proxyCurrentSelection_[selectedProxyGroup_] = proxyName;
-    PopulateProxyChoices();
-    AppendLog("[info] Selected " + wxString::FromUTF8(proxyName) + " for " +
-              wxString::FromUTF8(selectedProxyGroup_) + "\n");
+    if (!apiConnected_)
+        return;
+    switch (result.operation)
+    {
+    case MihomoApiOperation::Connections:
+        ApplyConnections(result.response);
+        break;
+    case MihomoApiOperation::Traffic:
+        ApplyTraffic(result.response);
+        break;
+    case MihomoApiOperation::Proxies:
+        if (result.requestId == proxyRequestId_)
+            ApplyProxies(result.response);
+        break;
+    case MihomoApiOperation::ProxyGroup:
+        if (result.requestId == proxyGroupRequestId_ && result.group == selectedProxyGroup_)
+            ApplyProxyGroup(result);
+        break;
+    case MihomoApiOperation::SelectProxy:
+        if (result.group != selectedProxyGroup_)
+            break;
+        if (!result.response.ok)
+        {
+            AppendLog("[error] Proxy selection failed: " +
+                      wxString::FromUTF8(result.response.error) + "\n");
+            break;
+        }
+        proxyCurrentSelection_[result.group] = result.proxy;
+        PopulateProxyChoices();
+        AppendLog("[info] Selected " + wxString::FromUTF8(result.proxy) + " for " +
+                  wxString::FromUTF8(result.group) + "\n");
+        break;
+    default:
+        break;
+    }
 }
 
 void MainFrame::OnConnectApi(wxCommandEvent&)
 {
+    if (connecting_ || apiConnected_)
+        return;
     corePath_ = settingsPage_->corePath->GetValue().ToStdString();
     configPath_ = settingsPage_->configPath->GetValue().ToStdString();
 
@@ -749,13 +805,11 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
     mihomoConfig_.externalController = controller;
     if (controller.rfind("http://", 0) != 0)
         controller = "http://" + controller;
-    apiClient_.SetBaseUrl(controller);
-    apiClient_.SetSecret(mihomoConfig_.secret);
-    apiClient_.SetTimeoutMs(3000);
+    apiService_.Configure({controller, mihomoConfig_.secret, 3000});
 
     std::string startError;
     if (!mihomoSidecar_.Start(corePath_, dataPath_, runtimeConfigPath,
-                              apiClient_, this, startError))
+                              this, startError))
     {
         std::cerr << "[WxClash] Sidecar error: " << startError << std::endl;
         apiConnected_ = false;
@@ -763,36 +817,14 @@ void MainFrame::OnConnectApi(wxCommandEvent&)
         return;
     }
 
-    const auto response = apiClient_.GetVersion();
-    if (!response.ok)
-    {
-        std::cerr << "[WxClash] API error: " << response.error << std::endl;
-        apiConnected_ = false;
-        mihomoSidecar_.RequestStop();
-        AppendLog("[error] API error: " + wxString::FromUTF8(response.error) + "\n");
-        return;
-    }
-    overviewPage_->status->SetLabel("API connected");
-    try
-    {
-        const auto versionRoot = Json::parse(response.body);
-        const auto version = versionRoot.find("version");
-        if (version != versionRoot.end() && version->is_string())
-            overviewPage_->version->SetLabel(
-                "Mihomo version: " + wxString::FromUTF8(version->get<std::string>()));
-    }
-    catch (const Json::parse_error&)
-    {
-        // A successful controller response is still useful if the optional
-        // version payload cannot be decoded.
-    }
-    apiConnected_ = true;
-    sidecarOutputTimer_.Start(200);
-    monitorTimer_.Start(2000);
+    connecting_ = true;
+    overviewPage_->status->SetLabel("Waiting for Mihomo controller...");
+    connectRequestId_ = apiService_.Connect();
 }
 
 void MainFrame::OnDisconnectApi(wxCommandEvent&)
 {
+    connecting_ = false;
     apiConnected_ = false;
     sidecarOutputTimer_.Stop();
     monitorTimer_.Stop();
@@ -816,9 +848,11 @@ void MainFrame::OnClose(wxCloseEvent& event)
         return;
 
     closing_ = true;
+    connecting_ = false;
     apiConnected_ = false;
     sidecarOutputTimer_.Stop();
     monitorTimer_.Stop();
+    apiService_.Shutdown();
 
     if (!mihomoSidecar_.IsRunning())
     {

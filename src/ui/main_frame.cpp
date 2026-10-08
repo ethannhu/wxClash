@@ -147,14 +147,14 @@ namespace
 
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_CLOSE(MainFrame::OnClose)
-    EVT_TIMER(wxID_HIGHEST + 8, MainFrame::OnSidecarOutput)
-    EVT_TIMER(wxID_HIGHEST + 10, MainFrame::OnMonitorTimer)
-    EVT_BUTTON(wxID_HIGHEST + 4, MainFrame::OnConnectApi)
-    EVT_BUTTON(wxID_HIGHEST + 11, MainFrame::OnDisconnectApi)
-    EVT_RADIOBOX(wxID_HIGHEST + 12, MainFrame::OnProxyGroupSelected)
-    EVT_RADIOBUTTON(wxID_HIGHEST + 13, MainFrame::OnProxySelected)
-    EVT_BUTTON(wxID_HIGHEST + 5, MainFrame::OnBrowseCore)
-    EVT_BUTTON(wxID_HIGHEST + 7, MainFrame::OnBrowseConfig)
+    EVT_TIMER(static_cast<int>(ControlId::SidecarOutputTimer), MainFrame::OnSidecarOutput)
+    EVT_TIMER(static_cast<int>(ControlId::MonitorTimer), MainFrame::OnMonitorTimer)
+    EVT_BUTTON(static_cast<int>(ControlId::ConnectApi), MainFrame::OnConnectApi)
+    EVT_BUTTON(static_cast<int>(ControlId::DisconnectApi), MainFrame::OnDisconnectApi)
+    EVT_RADIOBOX(static_cast<int>(ControlId::ProxyGroup), MainFrame::OnProxyGroupSelected)
+    EVT_RADIOBUTTON(static_cast<int>(ControlId::ProxyChoice), MainFrame::OnProxySelected)
+    EVT_BUTTON(static_cast<int>(ControlId::BrowseCore), MainFrame::OnBrowseCore)
+    EVT_BUTTON(static_cast<int>(ControlId::BrowseConfig), MainFrame::OnBrowseConfig)
     EVT_BUTTON(wxID_ANY, MainFrame::OnNavigation)
         EVT_CHOICE(wxID_ANY, MainFrame::OnModeChanged)
             wxEND_EVENT_TABLE()
@@ -162,8 +162,8 @@ wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
 MainFrame::MainFrame()
     : wxFrame(nullptr, wxID_ANY, "WxClash", wxDefaultPosition, wxSize(1100, 700),
       wxDEFAULT_FRAME_STYLE),
-      sidecarOutputTimer_(this, wxID_HIGHEST + 8),
-      monitorTimer_(this, wxID_HIGHEST + 10)
+      sidecarOutputTimer_(this, static_cast<int>(ControlId::SidecarOutputTimer)),
+      monitorTimer_(this, static_cast<int>(ControlId::MonitorTimer))
 {
     LoadSettings(corePath_, configPath_, maxLogLength_);
     dataPath_ = MihomoSidecar::DefaultDataPath();
@@ -221,12 +221,12 @@ void MainFrame::BuildNavigation(wxSizer *parentSizer)
     auto *panel = new wxPanel(this, wxID_ANY, wxDefaultPosition,
                               wxSize(kNavigationWidth, -1));
     auto *sizer = new wxBoxSizer(wxVERTICAL);
-    AddNavigationButton(panel, sizer, "Overview", PageOverview);
-    AddNavigationButton(panel, sizer, "Proxies", PageProxies);
-    AddNavigationButton(panel, sizer, "Connections", PageConnections);
-    AddNavigationButton(panel, sizer, "Logs", PageLogs);
-    AddNavigationButton(panel, sizer, "Settings", PageSettings);
-    AddNavigationButton(panel, sizer, "Mihomo", PageMihomo);
+    AddNavigationButton(panel, sizer, "Overview", PageId::Overview);
+    AddNavigationButton(panel, sizer, "Proxies", PageId::Proxies);
+    AddNavigationButton(panel, sizer, "Connections", PageId::Connections);
+    AddNavigationButton(panel, sizer, "Logs", PageId::Logs);
+    AddNavigationButton(panel, sizer, "Settings", PageId::Settings);
+    AddNavigationButton(panel, sizer, "Mihomo", PageId::Mihomo);
     sizer->AddStretchSpacer(1);
     panel->SetSizer(sizer);
     parentSizer->Add(panel, 0, wxEXPAND);
@@ -276,10 +276,10 @@ void MainFrame::BuildPages()
 void MainFrame::OnNavigation(wxCommandEvent &event)
 {
     const auto page = event.GetId();
-    if (page >= 0 && page < PageCount)
+    if (page >= 0 && page < static_cast<int>(PageId::Count))
     {
         book_->SetSelection(page);
-        if (page == PageProxies)
+        if (page == static_cast<int>(PageId::Proxies))
             RefreshProxies();
     }
 }
@@ -308,7 +308,8 @@ void MainFrame::OnMonitorTimer(wxTimerEvent&)
     if (!apiConnected_)
         return;
     const auto page = book_ ? book_->GetSelection() : wxNOT_FOUND;
-    if (page == PageOverview || page == PageConnections)
+    if (page == static_cast<int>(PageId::Overview) ||
+        page == static_cast<int>(PageId::Connections))
         RefreshCoreData();
 }
 
@@ -511,7 +512,8 @@ void MainFrame::RefreshProxies()
         if (labels.empty())
             labels.Add("No groups");
         proxyPage_->groups = new wxRadioBox(
-            proxyPage_->groupsPane, wxID_HIGHEST + 12, "Groups",
+            proxyPage_->groupsPane, static_cast<int>(ControlId::ProxyGroup),
+            "Groups",
             wxDefaultPosition, wxDefaultSize, labels, 1, wxRA_SPECIFY_COLS);
         groupSizer->Add(proxyPage_->groups, 1, wxEXPAND);
         proxyPage_->groupsPane->Layout();
@@ -652,8 +654,8 @@ void MainFrame::PopulateProxyChoices()
             label += "  [" + JsonString(&(*proxy), "type", "Proxy") + "]";
         if (current != proxyCurrentSelection_.end() && current->second == name)
             label += "  (selected)";
-        auto* button = new wxRadioButton(proxyPage_->choicesScroll,
-                                         wxID_HIGHEST + 13,
+        auto* button = new wxRadioButton(
+            proxyPage_->choicesScroll, static_cast<int>(ControlId::ProxyChoice),
                                          wxString::FromUTF8(label),
                                          wxDefaultPosition, wxDefaultSize,
                                          proxyPage_->choiceButtons.empty()

@@ -55,9 +55,11 @@ OverviewPage::OverviewPage(wxWindow* parent)
     sizer->Add(info, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, kSpacing);
 
     auto* shortcuts = new wxBoxSizer(wxHORIZONTAL);
-    shortcuts->Add(new wxButton(this, wxID_HIGHEST + 4, "Connect API"), 0,
+    shortcuts->Add(new wxButton(this, static_cast<int>(ControlId::ConnectApi),
+                                "Connect API"), 0,
                    wxRIGHT, kSpacing);
-    shortcuts->Add(new wxButton(this, wxID_HIGHEST + 11, "Disconnect"));
+    shortcuts->Add(new wxButton(this, static_cast<int>(ControlId::DisconnectApi),
+                                "Disconnect"));
     sizer->Add(shortcuts, 0, wxLEFT | wxRIGHT | wxBOTTOM, kSpacing);
 }
 
@@ -67,7 +69,8 @@ ProxyPage::ProxyPage(wxWindow* parent)
     auto* sizer = PageSizer(this, "Proxies");
     groupsPane = new wxPanel(this);
     auto* choicesPane = new wxPanel(this);
-    groups = new wxRadioBox(groupsPane, wxID_HIGHEST + 12, "Groups",
+    groups = new wxRadioBox(groupsPane, static_cast<int>(ControlId::ProxyGroup),
+                            "Groups",
                              wxDefaultPosition, wxDefaultSize,
                              wxArrayString{"No groups"}, 1, wxRA_SPECIFY_COLS);
     auto* groupsSizer = new wxBoxSizer(wxVERTICAL);
@@ -130,7 +133,8 @@ SettingsPage::SettingsPage(wxWindow* parent)
                               wxTE_PROCESS_ENTER);
     corePath->SetHint("Path to mihomo executable");
     coreSizer->Add(corePath, 1, wxEXPAND | wxRIGHT, kSpacing);
-    coreSizer->Add(new wxButton(this, wxID_HIGHEST + 5, "Browse..."));
+    coreSizer->Add(new wxButton(this, static_cast<int>(ControlId::BrowseCore),
+                                "Browse..."));
     connectionForm->Add(coreSizer, 1, wxEXPAND);
 
     connectionForm->Add(new wxStaticText(this, wxID_ANY, "Mihomo config"));
@@ -140,7 +144,8 @@ SettingsPage::SettingsPage(wxWindow* parent)
                                 wxTE_PROCESS_ENTER);
     configPath->SetHint("Path to mihomo YAML config");
     configSizer->Add(configPath, 1, wxEXPAND | wxRIGHT, kSpacing);
-    configSizer->Add(new wxButton(this, wxID_HIGHEST + 7, "Browse..."));
+    configSizer->Add(new wxButton(this, static_cast<int>(ControlId::BrowseConfig),
+                                  "Browse..."));
     connectionForm->Add(configSizer, 1, wxEXPAND);
     connectionForm->AddGrowableCol(1, 1);
     sizer->Add(connectionForm, 0, wxEXPAND | wxALL, kSpacing);

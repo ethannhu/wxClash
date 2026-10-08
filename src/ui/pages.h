@@ -4,6 +4,18 @@
 
 #include <wx/panel.h>
 
+enum class ControlId : int
+{
+    ConnectApi = wxID_HIGHEST + 1,
+    BrowseCore,
+    BrowseConfig,
+    SidecarOutputTimer,
+    MonitorTimer,
+    DisconnectApi,
+    ProxyGroup,
+    ProxyChoice
+};
+
 class wxCheckBox;
 class wxChoice;
 class wxDataViewListCtrl;

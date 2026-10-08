@@ -28,15 +28,15 @@ public:
     ~MainFrame() override;
 
 private:
-    enum PageId
+    enum class PageId
     {
-        PageOverview,
-        PageProxies,
-        PageConnections,
-        PageLogs,
-        PageSettings,
-        PageMihomo,
-        PageCount
+        Overview,
+        Proxies,
+        Connections,
+        Logs,
+        Settings,
+        Mihomo,
+        Count
     };
 
     void BuildNavigation(wxSizer* parentSizer);

@@ -1,25 +1,46 @@
 # WxClash
 
-## Linux 编译运行
+## CMake 编译
 
-安装构建工具和系统开发包（Debian/Ubuntu）：
+项目使用 CMake 管理构建和依赖。CMake 会在配置阶段通过 `FetchContent` 下载固定版本的 wxWidgets、yaml-cpp 和 nlohmann/json；wxWidgets 的 Git 子模块也会自动递归下载。
+
+需要安装：
+
+- CMake 3.20 或更高版本
+- Git
+- C++ 编译器
+- Ninja
+
+Linux（Debian/Ubuntu）：
 
 ```bash
-sudo apt install build-essential meson ninja-build libwxgtk3.2-dev libyaml-cpp-dev
+sudo apt install build-essential cmake ninja-build git libgtk-3-dev
 ```
 
-配置、编译并运行：
+配置和编译：
 
 ```bash
-meson setup builddir --buildtype=release
-meson compile -C builddir
+cmake --preset release
+cmake --build --preset release
 ./builddir/WxClash
 ```
 
-Meson 优先使用系统中的 wxWidgets 和 `yaml-cpp`。如果系统未安装这些依赖，Meson 会根据 `subprojects/*.wrap` 自动下载固定版本，并通过 CMake 子项目构建它们。wxWidgets 链接 `core`、`base` 和 `net` 组件。
+Windows + VS2022 Build Tools：
 
-重新配置已有构建目录：
+在 `x64 Native Tools Command Prompt for VS 2022` 中执行。VS2022 的 C++ Build Tools 环境只提供编译器和链接器，构建后端仍统一使用 Ninja：
+
+```bat
+cmake --preset release
+cmake --build --preset release
+```
+
+所有平台都使用 Ninja；不要使用 Unix Makefiles 或 Visual Studio generator。
+
+Windows 配置为 x64、Win7 最低版本和 `/MD` 动态 MSVC Runtime。wxWidgets、yaml-cpp 仍然构建为静态库；发布时需要提供兼容的 Visual C++ Redistributable。
+
+如果依赖下载失败，可以预先设置 CMake 的 FetchContent 源码目录，例如：
 
 ```bash
-meson setup builddir --reconfigure
+cmake -S . -B builddir -G Ninja \
+  -DFETCHCONTENT_SOURCE_DIR_WXWIDGETS=/path/to/wxWidgets
 ```
